@@ -1,3 +1,5 @@
+#include <ros/ros.h>
+#include <cv_bridge/cv_bridge.h>
 #include <opencv2/core/core.hpp>
 #include <iostream>
 #include <stdio.h>
@@ -39,7 +41,7 @@ int App_main( int argc, char** argv )
     Mat         image,  R , T ;
     vector<Mat> images, Rs, Ts;
     for(int i=0; i<numImg; i++){
-      sprintf(filename, "../Trajectory_30_seconds/scene_%03d.png", i);
+        sprintf(filename, "../Trajectory_30_seconds/scene_%03d.png", i);
         cout<<"Opening: "<< filename << endl;
         imread(filename, -1).convertTo(image, CV_32FC3, 1.0/65535.0);
         resize(image, image, Size(), reconstructionScale, reconstructionScale);
@@ -127,7 +129,7 @@ int App_main( int argc, char** argv )
             // reset costvolume
             costvolume=CostVolume(images[0], (FrameID)0, layers, near, far, Rs[0], Ts[0], cameraMatrix);
         }
-        s.waitForCompletion();// so we don't lock the whole system up forever
+        s.waitForCompletion(); // so we don't lock the whole system up forever
     }
     s.waitForCompletion();
     Stream::Null().waitForCompletion();
@@ -139,8 +141,14 @@ void myExit(){
 }
 
 int main( int argc, char** argv ){
+    ros::init(argc, argv, "dense_mapper");
+    ros::start();
+
     initGui();
     int ret = App_main(argc, argv);
     myExit();
+
+    ros::shutdown();
+
     return ret;
 }

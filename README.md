@@ -24,7 +24,14 @@ For building `OpenDTAM`, here is a brief instruction on Ubuntu 12.04 LTS.
 
     sudo apt-get install libboost1.48-all-dev
 
+#### ROS
+Add the path where you cloned openDTAM to the ROS_PACKAGE_PATH environment variable. To do this, modify your .bashrc and add at the bottom the following line (replace PATH_TO_PARENT_OF_ORB_SLAM):
+
+export ROS_PACKAGE_PATH=${ROS_PACKAGE_PATH}:PATH_TO_PARENT_OF_ORB_SLAM
+
 ### Build OpenDTAM
+
+	**If you use ROS Indigo, remove the depency of opencv2 in the manifest.xml.**
 
     cd OpenDTAM/Cpp
     mkdir Build
