@@ -10,6 +10,7 @@ rosbuild_init()
 set(EXECUTABLE_OUTPUT_PATH ${CMAKE_SOURCE_DIR}/build)
 set(LIBRARY_OUTPUT_PATH ${CMAKE_SOURCE_DIR}/build)
 
+set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g -ggdb ")
 
 find_package(OpenCV 2.4.9 EXACT REQUIRED)
@@ -53,4 +54,7 @@ target_link_libraries(OpenDTAM_L ${OpenCV_LIBS})
 
 rosbuild_add_executable(${PROJECT_NAME} Cpp/dense-mapping-orbslam-tracking.cpp Cpp/convertAhandaPovRayToStandard.cpp Cpp/graphics.cpp)
 target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBS} OpenDTAM_L ${Boost_LIBRARIES})
+
+add_executable(a.out Cpp/testmapper.cpp Cpp/convertAhandaPovRayToStandard.cpp Cpp/graphics.cpp)
+target_link_libraries(a.out ${OpenCV_LIBS} OpenDTAM_L ${Boost_LIBRARIES})
 

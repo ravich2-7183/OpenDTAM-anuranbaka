@@ -1,5 +1,6 @@
 #include <opencv2/core/core.hpp>
 #include <iostream>
+#include <fstream>
 #include <stdio.h>
 
 #include "convertAhandaPovRayToStandard.h"
@@ -30,6 +31,8 @@ int App_main( int argc, char** argv )
     const double sx                  = reconstructionScale;
     const double sy                  = reconstructionScale;
 
+    ofstream tf_out("../ahanda_tf.txt", ofstream::out);
+
 #if !defined WIN32 && !defined _WIN32 && !defined WINCE && defined __linux__ && !defined ANDROID
     pthread_setname_np(pthread_self(), "App_main");
 #endif
@@ -50,6 +53,9 @@ int App_main( int argc, char** argv )
                                       R, T);
         Rs.push_back(R.clone());
         Ts.push_back(T.clone());
+        
+        tf_out << "R["<< i << "] = " << endl << R << endl;
+        tf_out << "T["<< i << "] = " << endl << T << endl;
     }
 
     Mat ret; //a place to return downloaded images to
@@ -72,6 +78,7 @@ int App_main( int argc, char** argv )
     pfShow("Actual Image",     ret);
 
     cv::gpu::Stream s;
+    int idx = 0;
     for(int imageNum=0; imageNum < numImg; imageNum++){
         T=Ts[imageNum];
         R=Rs[imageNum];
@@ -125,12 +132,15 @@ int App_main( int argc, char** argv )
             }
 
             // reset costvolume
-            costvolume=CostVolume(images[0], (FrameID)0, layers, near, far, Rs[0], Ts[0], cameraMatrix);
+            idx += imagesPerCV;
+            costvolume=CostVolume(images[idx], (FrameID)0, layers, near, far, Rs[idx], Ts[idx], cameraMatrix);
         }
         s.waitForCompletion();// so we don't lock the whole system up forever
     }
     s.waitForCompletion();
     Stream::Null().waitForCompletion();
+
+    tf_out.close();
     return 0;
 }
 
