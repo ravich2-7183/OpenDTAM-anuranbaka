@@ -8,8 +8,8 @@ Camera.cols: 640
 # Camera calibration parameters (OpenCV) 
 Camera.fx: 481.20
 Camera.fy: 480.00
-Camera.cx: 800.7 #319.5
-Camera.cy: 719.5 #239.5
+Camera.cx: 319.5 # 800.7
+Camera.cy: 239.5 # 719.5
 
 # Camera distortion paremeters (OpenCV) --
 Camera.k1: 0.0

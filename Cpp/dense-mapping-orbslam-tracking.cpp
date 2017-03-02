@@ -143,6 +143,7 @@ public:
 
     
     cv::Mat Tcv = (Mat_<double>(3,1) << T.x(), T.y(), T.z());
+    // Tcv *= 100.00; // TODO: See if this works
 
     tf_out_ << "Rcv[" << tf_idx_ << "] = " << endl << Rcv << endl;
     tf_out_ << "Tcv[" << tf_idx_ << "] = " << endl << Tcv << endl;
@@ -160,8 +161,9 @@ public:
                             Rcv, Tcv, camera_matrix_);
       costvolume_ = costvolume;
       is_costvolume_initialized_ = true;
+      // return;
     }
-      
+    
     if(costvolume_.count < images_per_cost_volume_){
       // update costvolume_ & increment costvolume_.count
       costvolume_.updateCost(image_, Rcv, Tcv); 
