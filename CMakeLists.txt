@@ -52,8 +52,8 @@ set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}; -gencode arch=compute_30,code=compute_30
 cuda_add_library(OpenDTAM_L SHARED ${DTAM_SOURCES} Cpp/OpenDTAM.cpp)
 target_link_libraries(OpenDTAM_L ${OpenCV_LIBS})
 
-rosbuild_add_executable(${PROJECT_NAME} Cpp/dense-mapping-orbslam-tracking.cpp Cpp/convertAhandaPovRayToStandard.cpp Cpp/graphics.cpp)
-target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBS} OpenDTAM_L ${Boost_LIBRARIES})
+# rosbuild_add_executable(${PROJECT_NAME} Cpp/dense-mapping-orbslam-tracking.cpp Cpp/convertAhandaPovRayToStandard.cpp Cpp/graphics.cpp)
+# target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBS} OpenDTAM_L ${Boost_LIBRARIES})
 
 add_executable(a.out Cpp/testmapper.cpp Cpp/convertAhandaPovRayToStandard.cpp Cpp/graphics.cpp)
 target_link_libraries(a.out ${OpenCV_LIBS} OpenDTAM_L ${Boost_LIBRARIES})

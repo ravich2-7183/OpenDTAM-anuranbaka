@@ -1,12 +1,11 @@
-#include <opencv2/gpu/device/common.hpp>//for cudaSafeCall
-#include <opencv2/core/core.hpp>//for CV_Assert
+#include <opencv2/gpu/device/common.hpp> //for cudaSafeCall
+#include <opencv2/core/core.hpp> //for CV_Assert
 #include "DepthmapDenoiseWeightedHuber.cuh"
 
 namespace cv { namespace gpu { namespace device {
     namespace dtam_denoise{
 
-
-static unsigned int arows;//TODO:make sure this is still reentrant
+static unsigned int arows; //TODO:make sure this is still reentrant
 
 void loadConstants(uint h_rows, uint, uint , uint ,
         float* , float* , float* , float* , float* ,
@@ -19,32 +18,32 @@ cudaStream_t localStream=0;
 
 const int BLOCKX2D=32;
 const int BLOCKY2D=32;
-#define GENERATE_CUDA_FUNC2D(funcName,arglist,notypes)                                     \
-static __global__ void funcName arglist;                                                        \
-void funcName##Caller arglist{                                                           \
-   dim3 dimBlock(BLOCKX2D,BLOCKY2D);                                                                  \
-   dim3 dimGrid((acols  + dimBlock.x - 1) / dimBlock.x,                                  \
-                (arows + dimBlock.y - 1) / dimBlock.y);                                  \
-   funcName<<<dimGrid, dimBlock,0,localStream>>>notypes;                                  \
-   cudaSafeCall( cudaGetLastError() );\
-};static __global__ void funcName arglist
+
+#define GENERATE_CUDA_FUNC2D(funcName,arglist,notypes)      \
+    static __global__ void funcName arglist;                \
+    void funcName##Caller arglist{                          \
+      dim3 dimBlock(BLOCKX2D,BLOCKY2D);                     \
+      dim3 dimGrid((acols  + dimBlock.x - 1) / dimBlock.x,  \
+                   (arows + dimBlock.y - 1) / dimBlock.y);  \
+      funcName<<<dimGrid, dimBlock,0,localStream>>>notypes; \
+      cudaSafeCall( cudaGetLastError() );                   \
+    };static __global__ void funcName arglist
 
 
-#define GENERATE_CUDA_FUNC2DROWS(funcName,arglist,notypes)                                     \
-static __global__ void funcName arglist;                                                        \
-void funcName##Caller arglist{                                                           \
-   dim3 dimBlock(BLOCKX2D,BLOCKY2D);                                                                  \
-   dim3 dimGrid(1,                                  \
-                (arows + dimBlock.y - 1) / dimBlock.y);                                  \
-   funcName<<<dimGrid, dimBlock,0,localStream>>>notypes;                                  \
-   cudaSafeCall( cudaGetLastError() );\
-};static __global__ void funcName arglist
+#define GENERATE_CUDA_FUNC2DROWS(funcName,arglist,notypes)  \
+    static __global__ void funcName arglist;                \
+    void funcName##Caller arglist{                          \
+      dim3 dimBlock(BLOCKX2D,BLOCKY2D);                     \
+      dim3 dimGrid(1,                                       \
+                   (arows + dimBlock.y - 1) / dimBlock.y);  \
+      funcName<<<dimGrid, dimBlock,0,localStream>>>notypes; \
+      cudaSafeCall( cudaGetLastError() );                   \
+    };static __global__ void funcName arglist
 
 
 static __global__ void computeG1  (float* pp, float* g1p, float* gxp, float* gyp, int cols);
 static __global__ void computeG2  (float* pp, float* g1p, float* gxp, float* gyp, int cols);
 void computeGCaller  (float* pp, float* g1p, float* gxp, float* gyp, int cols){
-//   dim3 dimBlock(BLOCKX2D,BLOCKY2D);
    dim3 dimBlock(BLOCKX2D,4);
    dim3 dimGrid(1,
                 (arows + dimBlock.y - 1) / dimBlock.y);
@@ -60,28 +59,29 @@ void computeGCaller  (float* pp, float* g1p, float* gxp, float* gyp, int cols){
 GENERATE_CUDA_FUNC2DROWS(computeG1,
                      (float* pp, float* g1p, float* gxp, float* gyp, int cols),
                      (pp, g1p, gxp, gyp, cols)) {
-    #if __CUDA_ARCH__>=300
+#if __CUDA_ARCH__>=300
 //TODO: make compatible with cuda 2.0 and lower (remove shuffles). Probably through texture fetch
+//subscripts u,d,l,r mean up,down,left,right
 
-//Original pseudocode for this function:
-    // //subscripts u,d,l,r mean up,down,left,right
-    // void computeG(){
-    //     // g0 is the strongest nearby gradient (excluding point defects)
-    //     g0x=fabsf(pr-pl);//|dx|
-    //     g0y=fabsf(pd-pu);//|dy|
-    //     g0=max(g0x,g0y);
-    //     // g1 is the scaled g0 through the g function exp(-alpha*x^beta)
-    //     g1=sqrt(g0); //beta=0.5
-    //     alpha=3.5;
-    //     g1=exp(-alpha*g1);
-    //     //hard to explain this without a picture, but breaks are where both neighboring pixels are near a change
-    //     gx=max(g1r,g1);
-    //     gy=max(g1d,g1);
-    //     gu=gyu;  //upper spring is the lower spring of the pixel above
-    //     gd=gy;   //lower spring
-    //     gr=gx;   //right spring
-    //     gl=gxl;  //left spring is the right spring of the pixel to the left
-    // }
+/*  Original pseudocode for computeG()
+    void computeG(){
+        // g0 is the strongest nearby gradient (excluding point defects)
+        g0x=fabsf(pr-pl);//|dx|
+        g0y=fabsf(pd-pu);//|dy|
+        g0=max(g0x,g0y);
+        // g1 is the scaled g0 through the g function exp(-alpha*x^beta)
+        g1=sqrt(g0); //beta=0.5
+        alpha=3.5;
+        g1=exp(-alpha*g1);
+        //hard to explain this without a picture, but breaks are where both neighboring pixels are near a change
+        gx=max(g1r,g1);
+        gy=max(g1d,g1);
+        gu=gyu;  //upper spring is the lower spring of the pixel above
+        gd=gy;   //lower spring
+        gr=gx;   //right spring
+        gl=gxl;  //left spring is the right spring of the pixel to the left
+    }
+*/
     const float alpha=3.5f;
     int x = threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -255,8 +255,8 @@ GENERATE_CUDA_FUNC2DROWS(computeGunsafe,
 //TODO: make compatible with cuda 2.0 and lower (remove shuffles). Probably through texture fetch
 //TODO: rerun kernel on lines with y%32==31 or y%32==0 to fix stitch lines
 
-//Original pseudocode for this function:
-    // //subscripts u,d,l,r mean up,down,left,right
+//subscripts u,d,l,r mean up,down,left,right
+/*  Original pseudocode for computeG()
     // void computeG(){
     //     // g0 is the strongest nearby gradient (excluding point defects)
     //     g0x=fabsf(pr-pl);//|dx|
@@ -274,6 +274,7 @@ GENERATE_CUDA_FUNC2DROWS(computeGunsafe,
     //     gr=gx;   //right spring
     //     gl=gxl;  //left spring is the right spring of the pixel to the left
     // }
+*/
     const float alpha=3.5f;
     int x = threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -425,7 +426,6 @@ GENERATE_CUDA_FUNC2DROWS(computeGunsafe,
 
 }
 __device__ inline float saturate(float x){
-    //return x;
     return x/fmaxf(1.0f,fabsf(x));
 }
 // static __global__ void updateQD  (float* gqxpt, float* gqypt, float *dpt, float * apt,

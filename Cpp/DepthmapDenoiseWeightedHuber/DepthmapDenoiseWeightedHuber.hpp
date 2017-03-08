@@ -97,8 +97,8 @@ namespace cv{
 
             //flags
             bool cachedG;
-            int alloced;
-            int dInited;
+            bool alloced;
+            bool dInited;
             void setStream(Stream s){CV_Assert(!"Not Implemented");};
             Stream getStream(){CV_Assert(!"Not Implemented");};
             
