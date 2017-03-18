@@ -32,7 +32,7 @@ namespace cv{
                                       float theta) = 0;
 
             //! In case you want to do these explicitly
-            virtual void allocate(int rows, int cols, InputArray gx = GpuMat(),InputArray gy = GpuMat()) = 0;
+            virtual void allocate(int rows, int cols) = 0;
             virtual void cacheGValues(InputArray visibleLightImage = GpuMat()) = 0;
             
             virtual void setStream(Stream s) = 0;
@@ -71,19 +71,14 @@ namespace cv{
         class DepthmapDenoiseWeightedHuberImpl : public DepthmapDenoiseWeightedHuber
         {
         public:
-            //CostVolume cv;//The cost volume we are attached to
-            
             DepthmapDenoiseWeightedHuberImpl(const GpuMat& visibleLightImage=GpuMat(),Stream cvStream=Stream::Null());
             GpuMat operator()(InputArray ain, float epsilon, float theta);
 
             GpuMat visibleLightImage;
-            //buffers
-            GpuMat _qx,_qy,_d,_a,_g,_g1,_gx,_gy;
-            GpuMat stableDepth;
-
+            GpuMat _d,_a,_q,_g; // buffers
 
             //in case you want to do these explicitly
-            void allocate(int rows,int cols, InputArray gxin = GpuMat(), InputArray gyin = GpuMat());
+            void allocate(int rows, int cols);
             void cacheGValues(InputArray visibleLightImage=GpuMat());
 
         private:
@@ -93,12 +88,12 @@ namespace cv{
             void computeSigmas(float epsilon,float theta);
 
             //internal parameter values
-            float sigma_d,sigma_q;
-
+            float sigma_d, sigma_q;
+            
             //flags
-            bool cachedG;
-            bool alloced;
-            bool dInited;
+            bool cachedG, alloced, dInited;
+            Stream cvStream;
+
             void setStream(Stream s){CV_Assert(!"Not Implemented");};
             Stream getStream(){CV_Assert(!"Not Implemented");};
             
@@ -108,7 +103,6 @@ namespace cv{
             void setBeta(float beta){CV_Assert(!"Not Implemented");};
             float getBeta(){CV_Assert(!"Not Implemented");};
 
-            Stream cvStream;
         }; 
     }
 }

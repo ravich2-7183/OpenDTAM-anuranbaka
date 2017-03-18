@@ -11,6 +11,8 @@ using namespace cv;
 using namespace cv::gpu;
 using namespace std;
 
+int _N = 10;
+
 GpuMat _g1,_gx,_gy;
 int _rows, _cols;
 
@@ -40,10 +42,10 @@ void callComputeGScharr(GpuMat& im, GpuMat& grad){
 
 auto _startGPU = chrono::high_resolution_clock::now();
 auto _endGPU   = chrono::high_resolution_clock::now();
-void printTime(string codelabel) {
+void printTime(string codelabel, float N = 1.0f) {
   cout << codelabel
        << " ran in: \t\t"
-       <<  chrono::duration_cast<chrono::microseconds>(_endGPU - _startGPU).count()
+       <<  (float)(chrono::duration_cast<chrono::microseconds>(_endGPU - _startGPU).count())/N
        << " usec"
        << endl;
 }
@@ -75,25 +77,30 @@ int main(){
 
   GpuMat img(im);
 
-  // compute gradient using current method
-  _startGPU = chrono::high_resolution_clock::now();
-  {
-    allocate();
-    callComputeG(img);
-  }
-  _endGPU = chrono::high_resolution_clock::now();
-  printTime("callComputeG");
-  showResult(_gx, "gradient image x");
-
   // compute gradient using computeGScharr
   GpuMat grad(_rows, _cols, CV_32FC1);
+  // TODO find a way to load kernels before hand, rather than just in time
+  callComputeGScharr(img, grad); // force the kernel to get loaded first
   _startGPU = chrono::high_resolution_clock::now();
   {
-    callComputeGScharr(img, grad);
+    for(int i=1;i<=_N;i++)
+      callComputeGScharr(img, grad);
   }
   _endGPU = chrono::high_resolution_clock::now();
-  printTime("computeGScharr");
+  printTime("computeGScharr", _N);
   showResult(grad, "texture scharr gradient image x");
+
+  // compute gradient using current method
+  allocate();
+  callComputeG(img);
+  _startGPU = chrono::high_resolution_clock::now();
+  {
+    for(int i=1;i<=_N;i++)
+      callComputeG(img);
+  }
+  _endGPU = chrono::high_resolution_clock::now();
+  printTime("callComputeG", _N);
+  showResult(_gx, "gradient image x");
 
   // compute gradient using in-built cv cpu functions
   Mat cpu_grad_x, cpu_grad_y;

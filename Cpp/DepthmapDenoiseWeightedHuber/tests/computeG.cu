@@ -2,50 +2,41 @@
 #include <opencv2/core/core.hpp> // for CV_Assert
 #include "computeG.cuh"
 
+__global__ void computeG(float* g, float* img, int w, int h, float alpha=3.5f, float beta=1.0f)
+{
+  // Calculate texture coordinates
+  const int x = blockIdx.x * blockDim.x + threadIdx.x;
+  const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+  const int i  = (y * w + x);
+
+  // gradients gx := $\partial_{x}^{+}img$ computed using forward differences
+  float gx = (x==w-1)? 0.0f : img[i+1] - img[i];
+  float gy = (y==h-1)? 0.0f : img[i+w] - img[i];
+
+  g[i] = expf(-alpha*powf(sqrtf(gx*gx + gy*gy), beta));
+}
+
 // 2D float texture
 texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
 
-// TODO move this to computeG.cuh
-__global__ void computeGScharr(float* img, float* g, int width, int height);
-
-void computeGScharrCaller(float* img, float* g, int width, int height, int pitch)
-{
-  cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc(32, 0, 0, 0, cudaChannelFormatKindFloat);
-
-  // Set texture reference parameters
-  texRef.normalized     = false;
-  texRef.addressMode[0] = cudaAddressModeClamp;
-  texRef.addressMode[1] = cudaAddressModeClamp;
-  texRef.filterMode     = cudaFilterModeLinear;
-
-  // Bind the array to the texture reference
-  size_t offset;
-  cudaBindTexture2D(&offset, texRef, img, channelDesc,
-                    width, height, pitch);
- 
-  // Invoke kernel
-  dim3 dimBlock(16, 16);
-  dim3 dimGrid((width  + dimBlock.x - 1) / dimBlock.x,
-               (height + dimBlock.y - 1) / dimBlock.y);
-  computeGScharr<<<dimGrid, dimBlock>>>(img, g, width, height);
-}
-
 // Scharr gradient kernel
-__global__ void computeGScharr(float* img,
-                               float* g,
-                               int width, int height) 
+__global__ void computeGScharr(float* g, float* img, int w, int h, float alpha=3.5f, float beta=1.0f)
 {
     // Calculate texture coordinates
     float x = (float) (blockIdx.x * blockDim.x + threadIdx.x);
     float y = (float) (blockIdx.y * blockDim.y + threadIdx.y);
     
-    // Scharr kernels (combine Gaussian smoothing and differentiation)
-    /*  gx           gy
+    const int i = (int)(y * w + x);
+    
+    // Scharr kernels (combines Gaussian smoothing and differentiation)
+    /*  kx           ky
        -3 0  3       -3 -10 -3
       -10 0 10        0   0  0
        -3 0  3        3  10  3
     */
 
+    // Out of border references are clamped to [0, N-1]
     float gx, gy;
     gx = -3.0f * tex2D(texRef, x-1, y-1) +
           3.0f * tex2D(texRef, x+1, y-1) +
@@ -61,9 +52,36 @@ __global__ void computeGScharr(float* img,
           3.0f * tex2D(texRef, x-1, y+1) +
           3.0f * tex2D(texRef, x+1, y+1) ;
     
-    g[(int)(y * width + x)] = sqrtf(gx*gx + gy*gy);
-    // g[y * width + x] = expf(alpha*powf(sqrtf(gx*gx + gy*gy), beta));
+    g[i] = expf(-alpha*powf(sqrtf(gx*gx + gy*gy), beta));
 }
+
+void computeGScharrCaller(float* img, float* g, int width, int height, int pitch, float alpha, float beta)
+{
+  // cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc(32, 0, 0, 0, cudaChannelFormatKindFloat);
+
+  // // Set texture reference parameters
+  // texRef.normalized     = false;
+  // texRef.addressMode[0] = cudaAddressModeClamp; // out of border references return first or last element, 
+  // texRef.addressMode[1] = cudaAddressModeClamp; // this is good enough for Sobel/Scharr filter
+  // texRef.filterMode     = cudaFilterModeLinear;
+
+  // // Bind the array to the texture reference
+  // size_t offset;
+  // cudaBindTexture2D(&offset, texRef, img, channelDesc,
+  //                   width, height, pitch);
+ 
+  // Invoke kernel
+  // TODO set dimBlock based on warp size
+  dim3 dimBlock(16, 16);
+  dim3 dimGrid((width  + dimBlock.x - 1) / dimBlock.x,
+               (height + dimBlock.y - 1) / dimBlock.y);
+  computeG<<<dimGrid, dimBlock>>>(g, img, width, height, alpha, beta);
+  cudaDeviceSynchronize();
+  // cudaUnbindTexture(texRef);
+  cudaSafeCall( cudaGetLastError() );
+}
+
+//---------------------------------- original code ----------------------------
 
 /*  Pseudocode for computeG()
     void computeG(){
@@ -88,8 +106,6 @@ __global__ void computeGScharr(float* img,
 static __global__ void computeG1(float* pp, float* g1p, float* gxp, float* gyp, int cols);
 static __global__ void computeG2(float* pp, float* g1p, float* gxp, float* gyp, int cols);
 
-cudaStream_t localStream=0;
-
 const int BLOCKX2D=32;
 const int BLOCKY2D=4;
 
@@ -97,10 +113,10 @@ void computeGCaller(float* pp, float* g1p, float* gxp, float* gyp, int rows, int
   dim3 dimBlock(BLOCKX2D, BLOCKY2D);
   dim3 dimGrid(1, (rows + dimBlock.y - 1) / dimBlock.y);
 
-  computeG1<<<dimGrid, dimBlock,0,localStream>>>(pp, g1p, gxp, gyp, cols);
+  computeG1<<<dimGrid, dimBlock>>>(pp, g1p, gxp, gyp, cols);
   cudaDeviceSynchronize();
 
-  computeG2<<<dimGrid, dimBlock,0,localStream>>>(pp, g1p, gxp, gyp, cols);
+  computeG2<<<dimGrid, dimBlock>>>(pp, g1p, gxp, gyp, cols);
   cudaDeviceSynchronize();
    
   cudaSafeCall( cudaGetLastError() );

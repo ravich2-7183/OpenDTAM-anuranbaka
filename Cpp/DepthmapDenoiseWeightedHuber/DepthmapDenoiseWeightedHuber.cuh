@@ -3,20 +3,18 @@
 #define COSTVOLUME_CUH
 #include <opencv2/gpu/device/common.hpp>//for cudaStream_t
 namespace cv { namespace gpu { namespace device { namespace dtam_denoise{
-    struct m33{
-            float data[9];
-        };
-        struct m34{
-            float data[12];
-        };
-        void loadConstants(uint h_rows, uint h_cols, uint h_layers, uint h_layerStep,
-                float* h_a, float* h_d, float* h_cdata, float* h_lo, float* h_hi,
-                float* h_loInd);
 
-    void computeGCaller  (float* pp, float* g1p, float* gxp, float* gyp, int cols);
-    void updateQDCaller  (float* gqxpt, float* gqypt, float *dpt, float * apt,
-                    float *gxpt, float *gypt, int cols, float sigma_q, float sigma_d, float epsilon,
-                    float theta);
-    extern cudaStream_t localStream;
+void computeGCaller(float* img, float* g,
+                    int width, int height, int pitch,
+                    float alpha=3.5f, float beta=1.0f, bool useScharr=false);
+
+void update_q_dCaller(float *g, float *a,  // const input
+                      float *q, float *d,  // input q, d
+                      int width, int height, // dimensions
+                      float sigma_q, float sigma_d, float epsilon, float theta // parameters
+                      );
+
+
+
 }}}}
 #endif

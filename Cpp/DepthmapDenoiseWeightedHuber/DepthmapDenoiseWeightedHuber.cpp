@@ -29,69 +29,33 @@ CV_EXPORTS createDepthmapDenoiseWeightedHuber(InputArray visibleLightImage, Stre
     return Ptr<DepthmapDenoiseWeightedHuber>(new DepthmapDenoiseWeightedHuberImpl(visibleLightImage.getGpuMat(),cvStream));
 }
 
+// allocate buffer b such that it is continous in memory and has the shape of a
+#define CONTINUOUS_ALLOC(b, a) b.create(1, a.rows*a.cols, CV_32FC1); b=b.reshape(0, a.rows);
 
-#define FLATALLOC(n,cv) n.create(1,cv.rows*cv.cols, CV_32FC1);n=n.reshape(0,cv.rows)
-
-static void memZero(GpuMat& in,Stream& cvStream){
-    cudaSafeCall(cudaMemsetAsync(in.data, 0,
-                                 in.rows*in.cols*sizeof(float),
-                                 cv::gpu::StreamAccessor::getStream(cvStream)));
-}
-
-void DepthmapDenoiseWeightedHuberImpl::allocate(int _rows,int _cols,InputArray _gxin,InputArray _gyin){
-    const GpuMat& gxin=_gxin.getGpuMat();
-    const GpuMat& gyin=_gyin.getGpuMat();
-    
-    rows=_rows;
-    cols=_cols;
+void DepthmapDenoiseWeightedHuberImpl::allocate(int rows, int cols)
+{
     if(!(rows % 32 == 0 && cols % 32 == 0 && cols >= 64)){
-        CV_Assert(!"For performance reasons, DepthmapDenoiseWeightedHuber currenty only supports multiple of 32 image sizes with cols >= 64. Pad the image to achieve this.");
+        CV_Assert(!"For performance reasons, DepthmapDenoiseWeightedHuber currently supports ");
+        CV_Assert(!"only multiples of 32 image sizes with cols >= 64. Pad the image to achieve this.");
     }
-    
 
+    // organize this better. repeated code in operator()
     if(!_a.data){
         _a.create(1,rows*cols, CV_32FC1);
-        _a=_a.reshape(0,rows);
+        _a=_a.reshape(0, rows);
+
+        _q.create(1, 2*rows*cols, CV_32FC1);
+        _q=_q.reshape(0, 2*rows);
     }
-    FLATALLOC(_d, _a);
-    cachedG=1;
-    if(gxin.empty()||gyin.empty()){
-        if(gxin.empty()){
-            FLATALLOC(_gx,_d);
-            cachedG=0;
-        }else{
-            _gx=gxin;
-        }
-        if(gyin.empty()){
-            FLATALLOC(_gy,_d);
-            cachedG=0;
-        }else{
-            _gy=gyin;
-        }
-    }else{
-        
-        if(!gxin.isContinuous()){
-            FLATALLOC(_gx,_d);
-//             gxin.copyTo(_gx,cvStream);
-            cvStream.enqueueCopy(gxin,_gx);
-        }
-        if(!gyin.isContinuous()){
-            FLATALLOC(_gy,_d);
-//             gyin.copyTo(_gy,cvStream);
-            cvStream.enqueueCopy(gyin,_gy);
-        }
-    }
-    FLATALLOC(_qx, _d);
-    FLATALLOC(_qy, _d);
-    FLATALLOC(_g1, _d);
-    FLATALLOC(stableDepth,_d);
-    memZero(_qx,cvStream);
-    memZero(_qy,cvStream);
-    alloced=1;
+    
+    CONTINUOUS_ALLOC(_d, _a);
+    CONTINUOUS_ALLOC(_g, _a);
+
+    alloced=true;
 }
 
-
-void DepthmapDenoiseWeightedHuberImpl::computeSigmas(float epsilon,float theta){
+void DepthmapDenoiseWeightedHuberImpl::computeSigmas(float epsilon, float theta)
+{
     /*
     //This function is my best guess of what was meant by the line:
     //"Gradient ascent/descent time-steps sigma_q , sigma_d are set optimally
@@ -99,7 +63,7 @@ void DepthmapDenoiseWeightedHuberImpl::computeSigmas(float epsilon,float theta){
     // Where [3] is :
     //A. Chambolle and T. Pock. A first-order primal-dual 
     //algorithm for convex problems with applications to imaging.
-    //Journal of Mathematical Imaging and Vision, 40(1):120–
+    //Journal of Mathematical Imaging and Vision, 40(1):120-
     //145, 2011. 3, 4, 6
     //
     // I converted these mechanically to the best of my ability, but no 
@@ -132,66 +96,52 @@ void DepthmapDenoiseWeightedHuberImpl::computeSigmas(float epsilon,float theta){
     // cause divergence on the tangent parabola is guaranteed not to diverge 
     // on the base function (since the parabola is always higher(i.e. worse)).
     */
-        
-    float lambda, alpha,gamma,delta,mu,rho,sigma;
-    float L=4;//lower is better(longer steps), but in theory only >=4 is guaranteed to converge. For the adventurous, set to 2 or 1.44
+  
+    //lower is better(longer steps), but in theory only >=4 is guaranteed to converge. For the adventurous, set to 2 or 1.44        
+    float L=4;
     
-    lambda=1.0/theta;
-    alpha=epsilon;
+    float lambda = 1.0/theta;
+    float alpha  = epsilon;
     
-    gamma=lambda;
-    delta=alpha;
-    
-    mu=2.0*std::sqrt(gamma*delta)/L;
+    float mu = 2.0*sqrt(lambda*alpha)/L;
 
-    rho= mu/(2.0*gamma);
-    sigma=mu/(2.0*delta);
-    
-    sigma_d = rho;
-    sigma_q = sigma;
+    sigma_d = mu/(2.0*lambda);
+    sigma_q = mu/(2.0*alpha);
 }
 
-void DepthmapDenoiseWeightedHuberImpl::cacheGValues(InputArray _visibleLightImage){
+void DepthmapDenoiseWeightedHuberImpl::cacheGValues(InputArray visibleLightImage){
     using namespace cv::gpu::device::dtam_denoise;
+
     localStream = cv::gpu::StreamAccessor::getStream(cvStream);
-    if(!_visibleLightImage.empty()) {
-        visibleLightImage=_visibleLightImage.getGpuMat();
+
+    // TODO this should only be done once, why recheck in operator()
+    if(!alloced)
+        allocate(rows,cols);
+
+    if(!visibleLightImage.empty()) {
+        img = visibleLightImage.getGpuMat();
         cachedG=false;
     }
     if(cachedG)
-        return;//already cached
-    if(!alloced)
-        allocate(rows,cols);
+        return;
     
     // Call the gpu function for caching g's
-    loadConstants(rows, cols, 0, 0, 0, 0, 0, 0, 0, 0);
-    CV_Assert(_g1.isContinuous());
-    float* pp = (float*) visibleLightImage.data;//TODO: write a color version.
-    float* g1p = (float*)_g1.data;
-    float* gxp = (float*)_gx.data;
-    float* gyp = (float*)_gy.data;
-    computeGCaller(pp,  g1p,  gxp,  gyp, cols);
+    computeGCaller((float*)img.data, (float*)_g.data, cols, rows, img.step);
+
     cachedG=true;
 }
 
-GpuMat DepthmapDenoiseWeightedHuberImpl::operator()(InputArray _ain, float epsilon,float theta){
+GpuMat DepthmapDenoiseWeightedHuberImpl::operator()(InputArray _ain, float epsilon, float theta){
     const GpuMat& ain=_ain.getGpuMat();
     
     using namespace cv::gpu::device::dtam_denoise;
-    localStream = cv::gpu::StreamAccessor::getStream(cvStream);
     
     rows=ain.rows;
     cols=ain.cols;
     
-    CV_Assert(cols>0);
-    if(!(rows % 32 == 0 && cols % 32 == 0 && cols >= 64)){
-        CV_Assert(!"For performance reasons, DepthmapDenoiseWeightedHuber currently only supports multiple of 32 image sizes with cols >= 64. Pad the image to achieve this.");
-    }
-
-    if(!ain.isContinuous()){
+    if(ain.empty || !ain.isContinuous()){
         _a.create(1,rows*cols, CV_32FC1);
         _a=_a.reshape(0,rows);
-        // ain.copyTo(_a,cvStream);
         cvStream.enqueueCopy(ain,_a);
     }
     else {
@@ -202,34 +152,26 @@ GpuMat DepthmapDenoiseWeightedHuberImpl::operator()(InputArray _ain, float epsil
         allocate(rows,cols);
     } 
     
+    // TODO fix the visibleLightImage snafu
     if(!visibleLightImage.empty())
         cacheGValues();
     if(!cachedG){
-        // _gx.setTo(1,cvStream);
-        _gx=1;
-        // _gy.setTo(1,cvStream);
-        _gy=1;
+        _g=1.0f;
     }
     if(!dInited){
-        // _a.copyTo(_d,cvStream);
         cvStream.enqueueCopy(_a,_d);
-        dInited=1;
+        // TODO is the right place to do this?
+        _q = 0.0f;
+        dInited=true;
     }
     
     computeSigmas(epsilon,theta);
     
-    float* d = (float*) _d.data;
-    float* a = (float*) _a.data;
-    float* gxpt = (float*)_gx.data;
-    float* gypt = (float*)_gy.data;
-    float* gqxpt = (float*)_qx.data;
-    float* gqypt = (float*)_qy.data;
-
-    loadConstants(rows, cols, 0, 0, 0, 0, 0, 0, 0, 0);
-    updateQDCaller(gqxpt, gqypt, d, a,
-                   gxpt, gypt, cols,
-                   sigma_q, sigma_d,
-                   epsilon, theta);
+    update_q_dCaller((float*)_g.data, (float*)_a.data,  // const input
+                     (float*)_q.data, (float*)_d.data,  // input q, d
+                     cols, rows, // dimensions
+                     sigma_q, sigma_d, epsilon, theta // parameters
+                     );
     cudaSafeCall(cudaGetLastError());
     return _d;
 }

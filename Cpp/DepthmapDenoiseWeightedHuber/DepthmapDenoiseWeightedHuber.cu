@@ -2,888 +2,169 @@
 #include <opencv2/core/core.hpp> //for CV_Assert
 #include "DepthmapDenoiseWeightedHuber.cuh"
 
-namespace cv { namespace gpu { namespace device {
-    namespace dtam_denoise{
+namespace cv { namespace gpu { namespace device { namespace dtam_denoise{
 
-static unsigned int arows; //TODO:make sure this is still reentrant
+static __global__ void computeG(float* g, float* img, int w, int h, float alpha=3.5f, float beta=1.0f)
+{
+  // thread coordinates
+  const int x = blockIdx.x * blockDim.x + threadIdx.x;
+  const int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-void loadConstants(uint h_rows, uint, uint , uint ,
-        float* , float* , float* , float* , float* ,
-        float*) {
+  const int i  = (y * w + x);
 
-        arows=h_rows;
+  // gradients gx := $\partial_{x}^{+}img$ computed using forward differences
+  float gx = (x==w-1)? 0.0f : img[i+1] - img[i];
+  float gy = (y==h-1)? 0.0f : img[i+w] - img[i];
+
+  g[i] = expf(-alpha*powf(sqrtf(gx*gx + gy*gy), beta));
 }
 
-cudaStream_t localStream=0;
+// 2D float texture
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
 
-const int BLOCKX2D=32;
-const int BLOCKY2D=32;
-
-#define GENERATE_CUDA_FUNC2D(funcName,arglist,notypes)      \
-    static __global__ void funcName arglist;                \
-    void funcName##Caller arglist{                          \
-      dim3 dimBlock(BLOCKX2D,BLOCKY2D);                     \
-      dim3 dimGrid((acols  + dimBlock.x - 1) / dimBlock.x,  \
-                   (arows + dimBlock.y - 1) / dimBlock.y);  \
-      funcName<<<dimGrid, dimBlock,0,localStream>>>notypes; \
-      cudaSafeCall( cudaGetLastError() );                   \
-    };static __global__ void funcName arglist
-
-
-#define GENERATE_CUDA_FUNC2DROWS(funcName,arglist,notypes)  \
-    static __global__ void funcName arglist;                \
-    void funcName##Caller arglist{                          \
-      dim3 dimBlock(BLOCKX2D,BLOCKY2D);                     \
-      dim3 dimGrid(1,                                       \
-                   (arows + dimBlock.y - 1) / dimBlock.y);  \
-      funcName<<<dimGrid, dimBlock,0,localStream>>>notypes; \
-      cudaSafeCall( cudaGetLastError() );                   \
-    };static __global__ void funcName arglist
-
-
-static __global__ void computeG1  (float* pp, float* g1p, float* gxp, float* gyp, int cols);
-static __global__ void computeG2  (float* pp, float* g1p, float* gxp, float* gyp, int cols);
-void computeGCaller  (float* pp, float* g1p, float* gxp, float* gyp, int cols){
-   dim3 dimBlock(BLOCKX2D,4);
-   dim3 dimGrid(1,
-                (arows + dimBlock.y - 1) / dimBlock.y);
-
-   computeG1<<<dimGrid, dimBlock,0,localStream>>>(pp, g1p, gxp, gyp, cols);
-   cudaDeviceSynchronize();
-   computeG2<<<dimGrid, dimBlock,0,localStream>>>(pp, g1p, gxp, gyp, cols);
-   cudaDeviceSynchronize();
-   
-   cudaSafeCall( cudaGetLastError() );
-};
-
-GENERATE_CUDA_FUNC2DROWS(computeG1,
-                     (float* pp, float* g1p, float* gxp, float* gyp, int cols),
-                     (pp, g1p, gxp, gyp, cols)) {
-#if __CUDA_ARCH__>=300
-//TODO: make compatible with cuda 2.0 and lower (remove shuffles). Probably through texture fetch
-//subscripts u,d,l,r mean up,down,left,right
-
-/*  Original pseudocode for computeG()
-    void computeG(){
-        // g0 is the strongest nearby gradient (excluding point defects)
-        g0x=fabsf(pr-pl);//|dx|
-        g0y=fabsf(pd-pu);//|dy|
-        g0=max(g0x,g0y);
-        // g1 is the scaled g0 through the g function exp(-alpha*x^beta)
-        g1=sqrt(g0); //beta=0.5
-        alpha=3.5;
-        g1=exp(-alpha*g1);
-        //hard to explain this without a picture, but breaks are where both neighboring pixels are near a change
-        gx=max(g1r,g1);
-        gy=max(g1d,g1);
-        gu=gyu;  //upper spring is the lower spring of the pixel above
-        gd=gy;   //lower spring
-        gr=gx;   //right spring
-        gl=gxl;  //left spring is the right spring of the pixel to the left
-    }
-*/
-    const float alpha=3.5f;
-    int x = threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    int upoff=-(y!=0)*cols;
-    int dnoff=(y<gridDim.y*blockDim.y-1)*cols;
-    //itr0
-    int pt=x+y*cols;
-    float ph,pn,pu,pd,pl,pr;
-    float g0x,g0y,g0,g1,gt,gsav;
-    float tmp;
-    ph=pp[pt];
-    pn=pp[pt+blockDim.x];
-
-    pr=__shfl_down(ph,2);
-    tmp=__shfl_up(pn,30);
-    if(threadIdx.x>=30){
-        pr=tmp;
-    }
-    pl=ph;
-    pu=pp[pt+upoff];
-    pd=pp[pt+dnoff];
-
-
-    // g0 is the strongest nearby gradient (excluding point defects)
-        gt=fabsf(pr-pl);
-        g0x=__shfl_up(gt,1);//?xxxxxx no prior val
-        gsav=__shfl_down(gt,31);//x000000 for next time
-        g0x=threadIdx.x>0?g0x:0.0f;//0xxxxxx
-        g0y=fabsf(pd-pu);
-
-        g0=fmaxf(g0x,g0y);
-    // g1 is the scaled g0 through the g function
-        g1=sqrt(g0);
-        g1=exp(-alpha*g1);
-    //save
-        g1p[pt]=g1;
-
-    x+=32;
-    //itr 1:n-2
-    for(;x<cols-32;x+=32){
-        pt=x+y*cols;
-        ph=pn;
-        pn=pp[pt+blockDim.x];
-        pr=__shfl_down(ph,2);
-        tmp=__shfl_up(pn,30);
-        pr=threadIdx.x>=30?tmp:pr;
-
-        pl=ph;
-        pu=pp[pt+upoff];
-        pd=pp[pt+dnoff];
-
-        // g0 is the strongest nearby gradient (excluding point defects)
-            gt=fabsf(pr-pl);
-            g0x=__shfl_up(gt,1);//?xxxxxx
-            g0x=threadIdx.x>0?g0x:gsav;//xxxxxxx
-            gsav=__shfl_down(gt,31);//x000000 for next time
-            g0y=fabsf(pd-pu);
-
-            g0=fmaxf(g0x,g0y);
-
-        // g1 is the scaled g0 through the g function
-            g1=sqrt(g0);
-            g1=exp(-alpha*g1);
-        //save
-            g1p[pt]=g1;
-    }
-
-    //itr n-1
-    pt=x+y*cols;
-    ph=pn;
-    pr=__shfl_down(ph,2);
-    pl=ph;
-    pu=pp[pt+upoff];
-    pd=pp[pt+dnoff];
-
-    // g0 is the strongest nearby gradient (excluding point defects)
-        gt=fabsf(pr-pl);
-        g0x=__shfl_up(gt,1);//?xxxxxx
-        g0x=threadIdx.x>0?g0x:gsav;//xxxxxxx
-        g0y=fabsf(pd-pu);
-
-        g0=fmaxf(g0x,g0y);
-    // g1 is the scaled g0 through the g function
-        g1=sqrt(g0);
-        g1=exp(-alpha*g1);
-    //save
-        g1p[pt]=g1;
-#endif
-}
-GENERATE_CUDA_FUNC2DROWS(computeG2,
-                     (float* pp, float* g1p, float* gxp, float* gyp, int cols),
-                     (pp, g1p, gxp, gyp, cols)) {
-    #if __CUDA_ARCH__>=300
-    int x = threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    int dnoff=(y<gridDim.y*blockDim.y-1)*cols;
-    //itr0
-    int pt=x+y*cols;
-    float g1h,g1n,g1u,g1d,g1r,g1l,gx,gy;
-    float tmp;
-//part2, find gx,gy
-    x = threadIdx.x;
-    y = blockIdx.y * blockDim.y + threadIdx.y;
-    //itr0
-    pt=x+y*cols;
-
-    g1h=g1p[pt];
-    g1n=g1p[pt+blockDim.x];
-    g1r=__shfl_down(g1h,1);
-    tmp=__shfl_up(g1n,31);
-    if(threadIdx.x>=31){
-        g1r=tmp;
-    }
-    g1l=g1h;
-    g1u=g1h;
-    g1d=g1p[pt+dnoff];
-
-    gx=fmaxf(g1l,g1r);
-    gy=fmaxf(g1u,g1d);
-
-    //save
-        gxp[pt]=gx;
-        gyp[pt]=gy;
-    x+=32;
-    //itr 1:n-2
-    for(;x<cols-32;x+=32){
-        pt=x+y*cols;
-        g1h=g1n;
-        g1n=g1p[pt+blockDim.x];
-        g1r=__shfl_down(g1h,1);
-        tmp=__shfl_up(g1n,31);
-        g1r=threadIdx.x>=31?tmp:g1r;
-
-        g1l=g1h;
-        g1u=g1h;
-        g1d=g1p[pt+dnoff];
-
-        gx=fmaxf(g1l,g1r);
-        gy=fmaxf(g1u,g1d);
-        //save
-            gxp[pt]=gx;
-            gyp[pt]=gy;
-    }
-
-    //itr n-1
-    pt=x+y*cols;
-    g1h=g1n;
-    g1r=__shfl_down(g1h,1);
-    g1l=g1h;
-    g1u=g1h;
-    g1d=g1p[pt+dnoff];
-
-    gx=fmaxf(g1l,g1r);
-    gy=fmaxf(g1u,g1d);
-
-
-    //save
-        gxp[pt]=gx;
-        gyp[pt]=gy;
-#endif
-}
-
-
-//This version is faster, but makes synchronization errors at the lines between parts 1 and 2.
-//Could be fixed by a second pass for part 2 over the stitch lines, but I don't have time to figure that out
-//right now.
-GENERATE_CUDA_FUNC2DROWS(computeGunsafe,
-                     (float* pp, float* g1p, float* gxp, float* gyp, int cols),
-                     (pp, g1p, gxp, gyp, cols)) {
-    #if __CUDA_ARCH__>=300
-//TODO: make compatible with cuda 2.0 and lower (remove shuffles). Probably through texture fetch
-//TODO: rerun kernel on lines with y%32==31 or y%32==0 to fix stitch lines
-
-//subscripts u,d,l,r mean up,down,left,right
-/*  Original pseudocode for computeG()
-    // void computeG(){
-    //     // g0 is the strongest nearby gradient (excluding point defects)
-    //     g0x=fabsf(pr-pl);//|dx|
-    //     g0y=fabsf(pd-pu);//|dy|
-    //     g0=max(g0x,g0y);
-    //     // g1 is the scaled g0 through the g function exp(-alpha*x^beta)
-    //     g1=sqrt(g0); //beta=0.5
-    //     alpha=3.5;
-    //     g1=exp(-alpha*g1);
-    //     //hard to explain this without a picture, but breaks are where both neighboring pixels are near a change
-    //     gx=max(g1r,g1);
-    //     gy=max(g1d,g1);
-    //     gu=gyu;  //upper spring is the lower spring of the pixel above
-    //     gd=gy;   //lower spring
-    //     gr=gx;   //right spring
-    //     gl=gxl;  //left spring is the right spring of the pixel to the left
-    // }
-*/
-    const float alpha=3.5f;
-    int x = threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    int upoff=-(y!=0)*cols;
-    int dnoff=(y<gridDim.y*blockDim.y-1)*cols;
-    //itr0
-    int pt=x+y*cols;
-    float ph,pn,pu,pd,pl,pr;
-    float g0x,g0y,g0,g1,g1h,g1n,g1u,g1d,g1r,g1l,gx,gy,gt,gsav;
-    float tmp;
-    ph=pp[pt];
-    pn=pp[pt+blockDim.x];
-
-    pr=__shfl_down(ph,2);
-    tmp=__shfl_up(pn,30);
-    if(threadIdx.x>=30){
-        pr=tmp;
-    }
-    pl=ph;
-    pu=pp[pt+upoff];
-    pd=pp[pt+dnoff];
-
-
-    // g0 is the strongest nearby gradient (excluding point defects)
-        gt=fabsf(pr-pl);
-        g0x=__shfl_up(gt,1);//?xxxxxx no prior val
-        gsav=__shfl_down(gt,31);//x000000 for next time
-        g0x=threadIdx.x>0?g0x:0.0f;//0xxxxxx
-        g0y=fabsf(pd-pu);
-
-        g0=fmaxf(g0x,g0y);
-    // g1 is the scaled g0 through the g function
-        g1=sqrt(g0);
-        g1=exp(-alpha*g1);
-    //save
-        g1p[pt]=g1;
-
-    x+=32;
-    //itr 1:n-2
-    for(;x<cols-32;x+=32){
-        pt=x+y*cols;
-        ph=pn;
-        pn=pp[pt+blockDim.x];
-        pr=__shfl_down(ph,2);
-        tmp=__shfl_up(pn,30);
-        pr=threadIdx.x>=30?tmp:pr;
-
-        pl=ph;
-        pu=pp[pt+upoff];
-        pd=pp[pt+dnoff];
-
-        // g0 is the strongest nearby gradient (excluding point defects)
-            gt=fabsf(pr-pl);
-            g0x=__shfl_up(gt,1);//?xxxxxx
-            g0x=threadIdx.x>0?g0x:gsav;//xxxxxxx
-            gsav=__shfl_down(gt,31);//x000000 for next time
-            g0y=fabsf(pd-pu);
-
-            g0=fmaxf(g0x,g0y);
-
-        // g1 is the scaled g0 through the g function
-            g1=sqrt(g0);
-            g1=exp(-alpha*g1);
-        //save
-            g1p[pt]=g1;
-    }
-
-    //itr n-1
-    pt=x+y*cols;
-    ph=pn;
-    pr=__shfl_down(ph,2);
-    pl=ph;
-    pu=pp[pt+upoff];
-    pd=pp[pt+dnoff];
-
-    // g0 is the strongest nearby gradient (excluding point defects)
-        gt=fabsf(pr-pl);
-        g0x=__shfl_up(gt,1);//?xxxxxx
-        g0x=threadIdx.x>0?g0x:gsav;//xxxxxxx
-        g0y=fabsf(pd-pu);
-
-        g0=fmaxf(g0x,g0y);
-    // g1 is the scaled g0 through the g function
-        g1=sqrt(g0);
-        g1=exp(-alpha*g1);
-    //save
-        g1p[pt]=g1;
-
-//part2, find gx,gy
-    x = threadIdx.x;
-    y = blockIdx.y * blockDim.y + threadIdx.y;
-    //itr0
-    pt=x+y*cols;
-
-    g1h=g1p[pt];
-    g1n=g1p[pt+blockDim.x];
-    g1r=__shfl_down(g1h,1);
-    tmp=__shfl_up(g1n,31);
-    if(threadIdx.x>=31){
-        g1r=tmp;
-    }
-    g1l=g1h;
-    g1u=g1h;
-    g1d=g1p[pt+dnoff];
-
-    gx=fmaxf(g1l,g1r);
-    gy=fmaxf(g1u,g1d);
-
-    //save
-        gxp[pt]=gx;
-        gyp[pt]=gy;
-    x+=32;
-    //itr 1:n-2
-    for(;x<cols-32;x+=32){
-        pt=x+y*cols;
-        g1h=g1n;
-        g1n=g1p[pt+blockDim.x];
-        g1r=__shfl_down(g1h,1);
-        tmp=__shfl_up(g1n,31);
-        g1r=threadIdx.x>=31?tmp:g1r;
-
-        g1l=g1h;
-        g1u=g1h;
-        g1d=g1p[pt+dnoff];
-
-        gx=fmaxf(g1l,g1r);
-        gy=fmaxf(g1u,g1d);
-        //save
-            gxp[pt]=gx;
-            gyp[pt]=gy;
-    }
-
-    //itr n-1
-    pt=x+y*cols;
-    g1h=g1n;
-    g1r=__shfl_down(g1h,1);
-    g1l=g1h;
-    g1u=g1h;
-    g1d=g1p[pt+dnoff];
-
-    gx=fmaxf(g1l,g1r);
-    gy=fmaxf(g1u,g1d);
-
-
-    //save
-        gxp[pt]=gx;
-        gyp[pt]=gy;
-#endif
-
-}
-__device__ inline float saturate(float x){
-    return x/fmaxf(1.0f,fabsf(x));
-}
-// static __global__ void updateQD  (float* gqxpt, float* gqypt, float *dpt, float * apt,
-//                float *gxpt, float *gypt, float sigma_q, float sigma_d, float epsilon,
-//                float theta);//DANGER, no interblock synchronization = weird instability
-static __global__ void updateQ  (float* gqxpt, float* gqypt, float *dpt, float * apt,
-                float *gxpt, float *gypt, int cols, float sigma_q, float sigma_d, float epsilon,
-                float theta);
-static __global__ void updateD  (float* gqxpt, float* gqypt, float *dpt, float * apt,
-                float *gxpt, float *gypt, int cols, float sigma_q, float sigma_d, float epsilon,
-                float theta);
-
-void updateQDCaller(float* gqxpt, float* gqypt, float *dpt, float * apt,
-        float *gxpt, float *gypt, int cols, float sigma_q, float sigma_d, float epsilon,
-        float theta) {
-
-    dim3 dimBlock(BLOCKX2D, BLOCKY2D);
-    dim3 dimGrid(1, (arows + dimBlock.y - 1) / dimBlock.y);
-    CV_Assert(dimGrid.y>0);
-    cudaSafeCall( cudaGetLastError() );
-    updateQ<<<dimGrid, dimBlock,0,localStream>>>( gqxpt, gqypt, dpt, apt,
-            gxpt, gypt, cols, sigma_q, sigma_d, epsilon, theta);
-    cudaSafeCall( cudaGetLastError() );
-    updateD<<<dimGrid, dimBlock,0,localStream>>>( gqxpt, gqypt, dpt, apt,
-            gxpt, gypt, cols, sigma_q, sigma_d, epsilon, theta);
-    cudaSafeCall( cudaGetLastError() );
-};
-
-// static __global__ void updateQD  (float* gqxpt, float* gqypt, float *dpt, float * apt,
-//                 float *gxpt, float *gypt, float sigma_q, float sigma_d, float epsilon,
-//                 float theta) {
-//     //TODO: make compatible with cuda 2.0 and lower (remove shuffles). Probably through texture fetch
-// 
-//     //Original pseudocode for this function:
-// //void updateQD(){
-// //    //shifts are shuffles!
-// //    for (all x in blocks of warpsize;;){
-// //        //qx update
-// //        float dh,dn,qxh,gx,gqx,qyh,gy,gqy;
-// //        //load(dh,dn,gxh,gqx);//load here, next(the block to the right), local constant, old x force(with cached multiply)
-// //        dr=dh<<1;
-// //        tmp=dn>>31;
-// //        if (rt)
-// //            dr=tmp;
-// //        qxh=gqx/gxh;
-// //        qxh = (qxh+sigma_q*gxh*(dr-dh))/(1+sigma_q*epsilon);//basic spring force equation f=k(x-x0)
-// //        gqx = saturate(gxh*qxh);//spring saturates (with cached multiply), saturation force proportional to prob. of not an edge.
-// //        gqxpt[pt]=gqx;
-// //
-// //        //qy update
-// //        s[bpt]=dn;
-// //        if(!btm){
-// //            dd=s[bpt+bdnoff];
-// //        }else{
-// //            dd=dpt[pt+dnoff];
-// //        }
-// //        qyh=gqy/gy;
-// //        qyh=(qyh+sigma_q*gyh*(dd-dh))/(1+sigma_q*epsilon);
-// //        gqy=saturate(gyh*qyh);
-// //        gqypt[pt]=gqy;
-// //
-// //        //dx update
-// //        gqr=gqx;
-// //        gql=gqx>>1;
-// //        if (lf)
-// //            gql=gqsave;
-// //        gqsave=gqx<<31;//save for next iter
-// //        dacc = gqr - gql;//dx part
-// //
-// //        //dy update and d store
-// //        gqd=gqy;
-// //        s[bpt]=gqy;
-// //        if(!top)
-// //            gqu=s[bpt+bupoff];
-// //        else
-// //            gqu=gqxpt[pt + upoff];
-// //        dacc += gqd-gqu; //dy part
-// //        d = (d + sigma_d*(dacc+1/theta*ah))/(1+sigma_d/theta);
-// //        dpt[pt]=d;
-// //    }
-// //}
-//     __shared__ float s[32*BLOCKY2D];
-//     int x = threadIdx.x;
-//     int y = blockIdx.y * blockDim.y + threadIdx.y;
-//     bool rt=x==31;
-//     bool lf=x==0;
-//     bool top=y==0;
-//     bool btm=y==rows-1;
-//     bool btop=threadIdx.y==0;
-//     bool bbtm=threadIdx.y==blockDim.y-1;
-//     int pt, bpt,bdnoff ,dnoff, bupoff, upoff;
-// 
-// 
-//     float tmp,gqsave;
-//     gqsave=0;
-//     bpt = threadIdx.x+threadIdx.y*blockDim.x;
-//     bdnoff=blockDim.x;
-//     dnoff=(!btm)*cols;
-//     bupoff=-blockDim.x;
-//     upoff=-(!top)*cols;
-// 
-//     pt=x+y*cols;
-// 
-//     float dh,dn;
-//     dn=dpt[pt];
-// 
-//     for(;x<cols;x+=32){
-//         float qx,gx,gqx,qy,gy,gqy;
-//         pt=x+y*cols;
-// 
-// 
-//         //qx update
-//         {
-//             float dr;
-//             //load(dh,dn,gxh,gqx);//load here, next(the block to the right), local constant, old x force(with cached multiply)
-// 
-//             //load
-//             {
-//                 dh=dn;
-//                 if(x<cols-32){
-//                     dn=dpt[pt+32];
-// 
-//                 }
-//                 gqx=gqxpt[pt];
-//                 gx=gxpt[pt];
-// //                gx=1.0f;
-// 
-//             }
-// 
-//             dr=__shfl_down(dh,1);
-//             tmp=__shfl_up(dn,31);
-//             if (rt && x<cols-32)
-//                 dr=tmp;
-//             qx = gqx/gx;
-//             qx = (qx+sigma_q*gx*(dr-dh))/(1+sigma_q*epsilon);//basic spring force equation f=k(x-x0)
-//             gqx = saturate(gx*qx);//spring saturates (with cached multiply), saturation force proportional to prob. of not an edge.
-//             //gqxpt[pt]=gqx;
-//         }
-//         dpt[pt] = dh;
-//         //qy update
-//         {
-//             float dd;
-//             //load
-//                     {
-//                         gqy=gqypt[pt];
-//                         gy=gypt[pt];
-// //                        gy=1.0f;
-//                     }
-//             s[bpt]=dh;
-//             __syncthreads();
-//             if(!bbtm){
-//                 dd=s[bpt+bdnoff];
-//             }else{
-//                 dd=dpt[pt+dnoff];
-//             }
-//             qy = gqy/gy;
-//             qy = (qy+sigma_q*gy*(dd-dh))/(1+sigma_q*epsilon);
-//             gqy = saturate(gy*qy);
-//             //gqypt[pt]=gqy;
-//         }
-//         float dacc;
-//         //dx update
-//         {
-//             float gqr,gql;
-//             gqr=gqx;
-//             gql=__shfl_up(gqx,1);
-//             if (lf)
-//                 gql=gqsave;
-//             gqsave=__shfl_down(gqx,31);//save for next iter
-//             dacc = gqr - gql;//dx part
-//         }
-//         float d=dh;
-//         //dy update and d store
-//         {
-//             float a;
-//             //load
-//             {
-//                 a=apt[pt];
-//             }
-//             float gqu,gqd;
-// 
-//             gqd=gqy;
-//             s[bpt]=gqy;
-//             __syncthreads();
-//             if(!btop)
-//                 gqu=s[bpt+bupoff];
-//             else
-//                 gqu=gqypt[pt + upoff];
-//             if(y==0)
-//                 gqu=0.0f;
-//             dacc += gqd-gqu; //dy part
-//             d = ( d + sigma_d*(dacc + a/theta) ) / (1 + sigma_d/theta);
-//             //dpt[pt] = d;
-//         }
-//         __syncthreads();
-//         gqxpt[pt]=gqx;
-//         gqypt[pt]=gqy;
-//         dpt[pt] = d;
-//         __syncthreads();
-//     }
-// }
-
-
-GENERATE_CUDA_FUNC2DROWS(updateQ,
-                (float* gqxpt, float* gqypt, float *dpt, float * apt,
-                float *gxpt, float *gypt, int cols, float sigma_q, float sigma_d, float epsilon,
-                float theta),
-                ( gqxpt, gqypt, dpt, apt,
-                        gxpt, gypt, cols, sigma_q, sigma_d, epsilon, theta)) {
-    //TODO: make compatible with cuda 2.0 and lower (remove shuffles). Probably through texture fetch
-
-    //Original pseudocode for this function:
-//void updateQD(){
-//    //shifts are shuffles!
-//    for (all x in blocks of warpsize;;){
-//        //qx update
-//        float dh,dn,qxh,gx,gqx,qyh,gy,gqy;
-//        //load(dh,dn,gxh,gqx);//load here, next(the block to the right), local constant, old x force(with cached multiply)
-//        dr=dh<<1;
-//        tmp=dn>>31;
-//        if (rt)
-//            dr=tmp;
-//        qxh=gqx/gxh;
-//        qxh = (qxh+sigma_q*gxh*(dr-dh))/(1+sigma_q*epsilon);//basic spring force equation f=k(x-x0)
-//        gqx = saturate(gxh*qxh);//spring saturates (with cached multiply), saturation force proportional to prob. of not an edge.
-//        gqxpt[pt]=gqx;
-//
-//        //qy update
-//        s[bpt]=dn;
-//        if(!btm){
-//            dd=s[bpt+bdnoff];
-//        }else{
-//            dd=dpt[pt+dnoff];
-//        }
-//        qyh=gqy/gy;
-//        qyh=(qyh+sigma_q*gyh*(dd-dh))/(1+sigma_q*epsilon);
-//        gqy=saturate(gyh*qyh);
-//        gqypt[pt]=gqy;
-//
-//        //dx update
-//        gqr=gqx;
-//        gql=gqx>>1;
-//        if (lf)
-//            gql=gqsave;
-//        gqsave=gqx<<31;//save for next iter
-//        dacc = gqr - gql;//dx part
-//
-//        //dy update and d store
-//        gqd=gqy;
-//        s[bpt]=gqy;
-//        if(!top)
-//            gqu=s[bpt+bupoff];
-//        else
-//            gqu=gqxpt[pt + upoff];
-//        dacc += gqd-gqu; //dy part
-//        d = (d + sigma_d*(dacc+1/theta*ah))/(1+sigma_d/theta);
-//        dpt[pt]=d;
-//    }
-//}
-#if __CUDA_ARCH__>=300
-    __shared__ float s[32*BLOCKY2D];
-    int x = threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    bool rt=x==31;
-
-    bool bbtm=threadIdx.y==blockDim.y-1;
-    int pt, bpt,bdnoff ,dnoff;
+// Scharr gradient kernel
+static __global__ void computeGScharr(float* g, float* img, int w, int h, float alpha=3.5f, float beta=1.0f)
+{
+    // Calculate texture coordinates
+    float x = (float) (blockIdx.x * blockDim.x + threadIdx.x);
+    float y = (float) (blockIdx.y * blockDim.y + threadIdx.y);
     
-    float tmp;
-    bpt = threadIdx.x+threadIdx.y*blockDim.x;
-    bdnoff=blockDim.x;
-    dnoff=(y<gridDim.y*blockDim.y-1)*cols;
+    const int i = (int)(y * w + x);
+    
+    // Scharr kernels (combines Gaussian smoothing and differentiation)
+    /*  kx           ky
+       -3 0  3       -3 -10 -3
+      -10 0 10        0   0  0
+       -3 0  3        3  10  3
+    */
 
-    pt=x+y*cols;
+    // Out of border references are clamped to [0, N-1]
+    float gx, gy;
+    gx = -3.0f * tex2D(texRef, x-1, y-1) +
+          3.0f * tex2D(texRef, x+1, y-1) +
+         10.0f * tex2D(texRef, x-1, y  ) +
+        -10.0f * tex2D(texRef, x+1, y  ) +
+         -3.0f * tex2D(texRef, x-1, y+1) +
+          3.0f * tex2D(texRef, x+1, y+1) ;
 
-    float dh,dn;
-    dn=dpt[pt];
-
-
-    for(;x<cols;x+=32){
-        float qx,gx,gqx,qy,gy,gqy;
-        pt=x+y*cols;
-
-
-        //qx update
-        {
-            float dr;
-            //load(dh,dn,gxh,gqx);//load here, next(the block to the right), local constant, old x force(with cached multiply)
-
-            //load
-            {
-                dh=dn;
-                if(x<cols-32){
-                    dn=dpt[pt+32];
-
-                }
-                gqx=gqxpt[pt];
-                gx=gxpt[pt]+.01f;
-//                gx=1.0f;
-            }
-
-            dr=__shfl_down(dh,1);
-            tmp=__shfl_up(dn,31);
-            if (rt && x<cols-32)
-                dr=tmp;
-            qx = gqx/gx;
-            //qx+=(gx*(dr-dh)-epsilon*qx)*.5f;//simplified step
-            qx = (qx+sigma_q*gx*(dr-dh))/(1+sigma_q*epsilon);//basic spring force equation f=k(x-x0)
-            gqx = saturate(gx*qx);//spring saturates (with cached multiply), saturation force proportional to prob. of not an edge.
-            gqxpt[pt]=gqx;
-        }
-
-        //qy update
-        {
-            float dd;
-            //load
-                    {
-                        gqy=gqypt[pt];
-                        gy=gypt[pt]+.01f;
-//                        gy=1.0f;
-                    }
-            s[bpt]=dh;
-            __syncthreads();
-            if(!bbtm)
-                dd=s[bpt+bdnoff];
-            else
-                dd=dpt[pt+dnoff];
-            __syncthreads();
-            qy = gqy/gy;
-            //qy+=(gy*(dd-dh)-epsilon*qy)*.5f;//simplified step
-            qy = (qy+sigma_q*gy*(dd-dh))/(1+sigma_q*epsilon);
-            gqy = saturate(gy*qy);
-
-            gqypt[pt]=gqy;
-        }
-        //__syncthreads();
-    }
-#endif
+    gy = -3.0f * tex2D(texRef, x-1, y-1) +
+         -3.0f * tex2D(texRef, x+1, y-1) +
+        -10.0f * tex2D(texRef, x  , y-1) +
+         10.0f * tex2D(texRef, x  , y+1) +
+          3.0f * tex2D(texRef, x-1, y+1) +
+          3.0f * tex2D(texRef, x+1, y+1) ;
+    
+    g[i] = expf(-alpha*powf(sqrtf(gx*gx + gy*gy), beta));
 }
 
-GENERATE_CUDA_FUNC2DROWS(updateD,
-                (float* gqxpt, float* gqypt, float *dpt, float * apt,
-                float *gxpt, float *gypt,int cols, float sigma_q, float sigma_d, float epsilon,
-                float theta),
-                ( gqxpt, gqypt, dpt, apt,
-                        gxpt, gypt, cols, sigma_q, sigma_d, epsilon, theta)) {
-    #if __CUDA_ARCH__>=300
-    //TODO: make compatible with cuda 2.0 and lower (remove shuffles). Probably through texture fetch
+void computeGCaller(float* img, float* g,
+                    int width, int height, int pitch,
+                    float alpha, float beta, bool useScharr)
+{
+  // TODO set dimBlock based on warp size
+  dim3 dimBlock(16, 16);
+  dim3 dimGrid((width  + dimBlock.x - 1) / dimBlock.x,
+               (height + dimBlock.y - 1) / dimBlock.y);
 
-    //Original pseudocode for this function:
-//void updateQD(){
-//    //shifts are shuffles!
-//    for (all x in blocks of warpsize){
-//        //qx update
-//        float dh,dn,qxh,gx,gqx,qyh,gy,gqy;
-//        //load(dh,dn,gxh,gqx);//load here, next(the block to the right), local constant, old x force(with cached multiply)
-//        dr=dh<<1;
-//        tmp=dn>>31;
-//        if (rt)
-//            dr=tmp;
-//        qxh=gqx/gxh;
-//        qxh = (qxh+sigma_q*gxh*(dr-dh))/(1+sigma_q*epsilon);//basic spring force equation f=k(x-x0)
-//        gqx = saturate(gxh*qxh);//spring saturates (with cached multiply), saturation force proportional to prob. of not an edge.
-//        gqxpt[pt]=gqx;
-//
-//        //qy update
-//        s[bpt]=dn;
-//        if(!btm){
-//            dd=s[bpt+bdnoff];
-//        }else{
-//            dd=dpt[pt+dnoff];
-//        }
-//        qyh=gqy/gy;
-//        qyh=(qyh+sigma_q*gyh*(dd-dh))/(1+sigma_q*epsilon);
-//        gqy=saturate(gyh*qyh);
-//        gqypt[pt]=gqy;
-//
-//        //dx update
-//        gqr=gqx;
-//        gql=gqx>>1;
-//        if (lf)
-//            gql=gqsave;
-//        gqsave=gqx<<31;//save for next iter
-//        dacc = gqr - gql;//dx part
-//
-//        //dy update and d store
-//        gqd=gqy;
-//        s[bpt]=gqy;
-//        if(!top)
-//            gqu=s[bpt+bupoff];
-//        else
-//            gqu=gqxpt[pt + upoff];
-//        dacc += gqd-gqu; //dy part
-//        d = (d + sigma_d*(dacc+1/theta*ah))/(1+sigma_d/theta);
-//        dpt[pt]=d;
-//    }
-//}
-    __shared__ float s[32*BLOCKY2D];
-    int x = threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    bool lf=x==0;
-    bool top=y==0;
-    bool btop=threadIdx.y==0;
-    int pt, bpt, bupoff, upoff;
+  if(useScharr) {
+    cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc(32, 0, 0, 0, cudaChannelFormatKindFloat);
 
+    // Set texture reference parameters
+    texRef.normalized     = false;
+    texRef.addressMode[0] = cudaAddressModeClamp; // out of border references return first or last element, 
+    texRef.addressMode[1] = cudaAddressModeClamp; // this is good enough for Sobel/Scharr filter
+    texRef.filterMode     = cudaFilterModeLinear;
 
-    float gqsave=0;
-    bpt = threadIdx.x+threadIdx.y*blockDim.x;
-
-    bupoff=-blockDim.x;
-    upoff=-(!top)*cols;
-
-    pt=x+y*cols;
-
-    for(;x<cols;x+=32){
-        float gqx,gqy;
-        pt=x+y*cols;
-
-
-        float dacc;
-        //dx update
-        {
-            float gqr,gql;
-            gqr=gqx=gqxpt[pt];
-            gql=__shfl_up(gqx,1);
-            if (lf)
-                gql=gqsave;
-            gqsave=__shfl_down(gqx,31);//save for next iter
-            dacc = gqr - gql;//dx part
-        }
-        //dy update and d store
-        {
-            float a;
-            //load
-            {
-                a=apt[pt];
-            }
-            float gqu,gqd;
-            float d=dpt[pt];
-            gqd=gqy=gqypt[pt];
-            s[bpt]=gqy;
-            __syncthreads();
-            if(!btop)
-                gqu=s[bpt+bupoff];
-            else
-                gqu=gqypt[pt + upoff];
-            if(y==0)
-                gqu=0.0f;
-            dacc += gqd-gqu; //dy part
-            //d += dacc*.5f;//simplified step
-            d = ( d + sigma_d*(dacc + a/theta) ) / (1 + sigma_d/theta);
-
-            dpt[pt] = d;
-        }
-        __syncthreads();//can't figure out why this is needed, but it is to avoid subtle errors in Qy at the ends of the warp
-    }
-#endif
+    // Bind the array to the texture reference
+    size_t offset;
+    cudaBindTexture2D(&offset, texRef, img, channelDesc, width, height, pitch);
+ 
+    // Invoke kernel
+    computeGScharr<<<dimGrid, dimBlock>>>(g, img, width, height, alpha, beta);
+    cudaDeviceSynchronize();
+    cudaUnbindTexture(texRef);
+    cudaSafeCall( cudaGetLastError() );
+  }
+  else {
+    computeG<<<dimGrid, dimBlock>>>(g, img, width, height, alpha, beta);
+    cudaDeviceSynchronize();
+    cudaSafeCall( cudaGetLastError() );
+  }
 }
 
+static __global__ void update_q(float *g, float *a,  // const input
+                                float *q, float *d,  // input  q, d
+                                int w, int h, // dimensions: width, height
+                                float sigma_q, float sigma_d, float epsilon, float theta // parameters
+                                )
+{
+  // thread coordinates
+  const int x = blockIdx.x * blockDim.x + threadIdx.x;
+  const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+  const int i  = (y * w + x);
+  const int wh = (w*h);
+
+  // gradients dd_x := $\partial_{x}^{+}d$ computed using forward differences
+  float dd_x = (x==w-1)? 0.0f : d[i+1] - d[i];
+  float dd_y = (y==h-1)? 0.0f : d[i+w] - d[i];
+
+  float qx = (q[i]    + sigma_q*g[i]*dd_x) / (1.0f + sigma_q*epsilon);
+  float qy = (q[i+wh] + sigma_q*g[i]*dd_y) / (1.0f + sigma_q*epsilon);
+
+  // reproject q **element-wise**
+  // if the whole vector q had to be reprojected, a tree-reduction sum would have been required
+  float maxq = fmaxf(1.0f, sqrtf(qx*qx + qy*qy));
+  q[i]    = qx / maxq;
+  q[i+wh] = qy / maxq;
+}
+
+static __global__ void update_d(float *g, float *a,  // const input
+                                float *q, float *d,  // input  q, d
+                                int w, int h, // dimensions: width, height
+                                float sigma_q, float sigma_d, float epsilon, float theta // parameters
+                                )
+{
+  // thread coordinates
+  const int x = blockIdx.x * blockDim.x + threadIdx.x;
+  const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+  const int i  = (y * w + x);
+  const int wh = (w*h);
+
+  // div_q computed using backward differences
+  float dqx_x = (x==0)? q[i]    - q[i+1]    : q[i]    - q[i-1];
+  float dqy_y = (y==0)? q[i+wh] - q[i+wh+w] : q[i+wh] - q[i+wh-w];
+  float div_q = dqx_x + dqy_y;
+
+  d[i]  = (d[i] + sigma_d*(g[i]*div_q + a[i]/theta)) / (1.0f + sigma_d/theta);
+}
+
+void update_q_dCaller(float *g, float *a,  // const input
+                      float *q,  float *d,  // input q, d
+                      int width, int height, // dimensions
+                      float sigma_q, float sigma_d, float epsilon, float theta // parameters
+                      )
+{
+  dim3 dimBlock(16, 16);
+  dim3 dimGrid((width  + dimBlock.x - 1) / dimBlock.x,
+               (height + dimBlock.y - 1) / dimBlock.y);
+
+  update_q<<<dimGrid, dimBlock>>>(g, a,  // const input
+                                  q, d,  // input  q, d
+                                  width, height, // dimensions: width, height
+                                  sigma_q, sigma_d, epsilon, theta // parameters
+                                  );
+  cudaDeviceSynchronize();
+  cudaSafeCall( cudaGetLastError() );
+
+  update_d<<<dimGrid, dimBlock>>>(g, a,  // const input
+                                  q, d,  // input  q, d
+                                  width, height, // dimensions: width, height
+                                  sigma_q, sigma_d, epsilon, theta // parameters
+                                  );
+  cudaDeviceSynchronize();
+  cudaSafeCall( cudaGetLastError() );
+}
 
 }}}}
