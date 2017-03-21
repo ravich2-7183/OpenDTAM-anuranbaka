@@ -16,7 +16,6 @@ using namespace cv;
 
 typedef size_t st;
 
-
 //some defines to make typing all this easier
 #define down (point+w)
 #define up (point-w)
@@ -30,11 +29,6 @@ typedef size_t st;
 
 #define QUIET_DTAM 0
 #include "quiet.hpp"
-
-
-
-
-
 
 void Cost::initOptimization(){//must be thread safe in allocations(i.e. don't do any after first time!)
 
@@ -70,8 +64,6 @@ void Cost::computeSigmas(){
     sigma=mu/(2.0*delta);
     sigma_d = rho;
     sigma_q = sigma;
-
-
 }
 
 void Cost::cacheGValues(){
@@ -116,7 +108,7 @@ void Cost::cacheGValues(){
     g2=abs(g2);
     gy=cv::max(g1,g2);
     
-    _g=gx+gy;//Getting lazy, just do L1 norm
+    _g=gx+gy; //Getting lazy, just do L1 norm
     
     toc();
     //The g function (Eq. 5)
@@ -145,31 +137,13 @@ void Cost::cacheGValues(){
     pfShow("g",_g,0,Vec2d(0,1));
     
 }
-/*inline float Cost::aBasic(float* data,float l,float ds,float d){
-    int mi=0;
-    float mv=1.0/(2.0*theta)*ds*ds*(d-0)*(d-0) + data[0]*lambda; //Literal implementation of Eq.14, note the datastep^2 factor to scale correctly
-    for(int a=1;a<l;a++){
-        float v=1.0/(2.0*theta)*ds*ds*(d-a)*(d-a) + data[a]*lambda;
-        if(v<mv){
-            mv=v;
-            mi=a;
-        }
-    }
-    if(mi==l-1||mi==0){
-        return (float)mi;
-    }
-    float A=data[mi-1];
-    float B=mv;
-    float C=data[mi+1];
-    return (A-C)/(A-2*B+C)*.5+float(mi);
-}*/
 
 static inline float afunc(float* data,float theta,float d,float ds,int a,float lambda){
-    return 1.0/(2.0*theta)*ds*ds*(d-a)*(d-a) + data[a]*lambda;//Literal implementation of Eq.14, note the datastep^2 factor to scale correctly
-//     return 1.0/(2.0*theta)*(d-a)*(d-a) + data[a]*lambda;//forget the ds^2 factor for better numerical behavior(sometimes)
-//     return std::abs(1.0/(2.0*theta)*ds*ds*(d-a)) + data[a]*lambda;//L1 Version
+    // Literal implementation of Eq.14, note the datastep^2 factor to scale correctly
+    return 1.0/(2.0*theta)*ds*ds*(d-a)*(d-a) + data[a]*lambda;
+//  return 1.0/(2.0*theta)*(d-a)*(d-a) + data[a]*lambda; //forget the ds^2 factor for better numerical behavior(sometimes)
+//  return std::abs(1.0/(2.0*theta)*ds*ds*(d-a)) + data[a]*lambda; //L1 Version
 }
-
 
 inline float Cost::aBasic(float* data,float l,float ds,float d,float& value){
     int mi=0;
@@ -212,37 +186,16 @@ inline float Cost::aBasic(float* data,float l,float ds,float d,float& value){
     return delt+float(mi);
 }
 
-
-// //
-// static inline float aUpdate(float* data,int loind, int hiind, float d, float k, float range){
-//     //k=dataStep^2/(2*theta*lambda)
-//     int astart=max(loind,(int)(d-range))
-//     int aend=min(hiind,(int)(d+range))
-//     idx=0;
-//     mv=data[0]+
-//     do{
-//         
-//     }while(
-//     if (discreteMin==loind||discreteMin==hiind){
-//         return (float)((int)(discreteMin-loind));
-//     }
-//     //we're strictly inside the safe region, so no worries about interpolation touching bad points
-//     float A=discreteMin[-1];
-//     float B=discreteMin[0];
-//     float C=discreteMin[1];
-//     return (A-C)/(A-2*B+C)*.5+float(discreteMin-loind);
-// }
-
 static void* Cost_optimizeQD(void* object);
 static void* Cost_optimizeA(void* object);
 static void launch_optimzer_thread(Cost& cost);
-
 
 static void launch_optimzer_threads(const Cost* cost){
     pthread_t threadQD,threadA;
     pthread_create( &threadQD, NULL, Cost_optimizeQD, (void*) cost);
     pthread_create( &threadA, NULL, Cost_optimizeA, (void*) cost);
 }
+
 static void* Cost_optimizeQD(void* object){
     pthread_setname_np(pthread_self(),"QDthread");
     Cost* cost = (Cost*)object;
@@ -255,6 +208,7 @@ static void* Cost_optimizeQD(void* object){
     }
     cost->running_qd=false;
 }
+
 static void* Cost_optimizeA(void* object){
     pthread_setname_np(pthread_self(),"Athread");
     Cost* cost = (Cost*)object;
@@ -322,31 +276,13 @@ tic();
         assert(point%w==0);
         pstop=i*w-1;
         
-        qcore(
-            denom,
-            point, 
-             pstop, 
-             kx,
-             ky,
-            d,
-            gd,
-            gu,
-            gl,
-            gr,
-            sigma_q,
-             w);point=pstop;
-//         for (;point<pstop;point++){
-//             //Unnumbered Eq.s at end of section 2.2.3
-//             //Sign is flipped due to caching a negative value
-//             //cout<<sigma_q<<endl;
-//             kxn=(kx[here] + sigma_q*((d[here]-d[right])*gright))/denom;
-//             kyn=(ky[here] + sigma_q*((d[here]-d[down])*gdown))/denom;
-//             nm=sqrt(kxn*kxn+kyn*kyn);
-//             pd=std::max(1.0f,nm);
-//             kx[here]=kxn/pd;
-//             ky[here]=kyn/pd;
-//             //kx[here]=d[here]-d[right];
-//         }
+        qcore(denom, point, pstop,
+              kx, ky,
+              d,
+              gd, gu, gl, gr, 
+              sigma_q, w);
+        point=pstop;
+        
         //last col
         kxn=0;
         kyn=(ky[here] + sigma_q*((d[here]-d[down])*gdown))/denom;
@@ -356,8 +292,8 @@ tic();
         ky[here]=kyn/pd;
         point++;
     }
+    
     //last row
-
     pstop=h*w-1;
     for (;point<pstop;point++){
         kxn=(kx[here] + sigma_q*((d[here]-d[right])*gright))/denom;
@@ -370,7 +306,8 @@ tic();
     //last col,row
     kx[here]=0;
     ky[here]=0;
-toc();
+    
+    toc();
 
     //d update (10 read,1 write per point)
     denom=1+sigma_d/theta;
@@ -378,18 +315,18 @@ toc();
     //top left
     point=0;
     pstop=1;
-    d[here] = (d[here]-sigma_d*(                 gdown*ky[here]               +gright*kx[here]                 - a[here]/theta))/denom;
+    d[here]=(d[here]-sigma_d*(gdown*ky[here] + gright*kx[here] - a[here]/theta))/denom;
     point++;
 
     //toprow
     pstop+=w-2;
     for (;point<pstop;point++){
-        d[here] = (d[here]-sigma_d*(             gdown*ky[here]+gleft*kx[left]+gright*kx[here]                 - a[here]/theta))/denom;
+      d[here]=(d[here]-sigma_d*(gdown*ky[here]+gleft*kx[left]+gright*kx[here]-a[here]/theta))/denom;
     }
 
     //top right
     pstop++;
-    d[here] = (d[here]-sigma_d*(                 gdown*ky[here]+gleft*kx[left]                                 - a[here]/theta))/denom;
+    d[here]=(d[here]-sigma_d*(gdown*ky[here]+gleft*kx[left]-a[here]/theta))/denom;
     point++;
     assert(point%w==0);
 
@@ -398,48 +335,39 @@ toc();
     for(;pstop<corestop;){
         //left core
         pstop++;
-        d[here] = (d[here]-sigma_d*(      gup*ky[up]+gdown*ky[here]               +gright*kx[here]             - a[here]/theta))/denom;
+        d[here]=(d[here]-sigma_d*(gup*ky[up]+gdown*ky[here]+gright*kx[here]-a[here]/theta))/denom;
         point++;
         //inner core
         pstop+=w-2;
         for(;point<pstop;point++){
-            d[here] = (d[here]-sigma_d*(  gup*ky[up]+gdown*ky[here]+gleft*kx[left]+gright*kx[here]             - a[here]/theta))/denom;
+          d[here]=(d[here]-sigma_d*(gup*ky[up]+gdown*ky[here]+gleft*kx[left]+gright*kx[here]-a[here]/theta))/denom;
         }
         //right core
         pstop++;
-        d[here] = (d[here]-sigma_d*(      gup*ky[up]+gdown*ky[here]+gleft*kx[left]                             - a[here]/theta))/denom;
+        d[here]=(d[here]-sigma_d*(gup*ky[up]+gdown*ky[here]+gleft*kx[left]-a[here]/theta))/denom;
         point++;
     }
     assert(point==pstop);
     assert(pstop==corestop);
     //left bottom
     pstop++;
-    d[here] = (d[here]-sigma_d*(          gup*ky[up]+                              +gright*kx[here]             - a[here]/theta))/denom;
+    d[here]=(d[here]-sigma_d*(gup*ky[up]+gright*kx[here]-a[here]/theta))/denom;
     point++;
         
     //bottom row
     pstop+=w-2;
     for(;point<pstop;point++){
-        d[here] = (d[here]-sigma_d*(      gup*ky[up]               +gleft*kx[left]+gright*kx[here]              - a[here]/theta))/denom;
+      d[here]=(d[here]-sigma_d*(gup*ky[up]+gleft*kx[left]+gright*kx[here]-a[here]/theta))/denom;
     }
 
     //bottom left
     pstop++;
-    d[here] = (d[here]-sigma_d*(          gup*ky[up]               +gleft*kx[left]                              - a[here]/theta))/denom;
+    d[here]=(d[here]-sigma_d*(gup*ky[up]+gleft*kx[left]-a[here]/theta))/denom;
     point++;
 
-    //debug
-//     pfShow("qx",abs(_qx));
-//     pfShow("d",_d);
-//     pfShow("a",_a);
     assert(aptr==_a.data);
     gcheck();
     usleep(1);
-    
-
-        
-
-    
 }
 
 void Cost::optimizeA(){ 
@@ -478,38 +406,16 @@ void Cost::optimizeA(){
     }
     pfShow("d",_d,0,Vec2d(0,layers));
     pfShow("a",_a,0,Vec2d(0,layers));
-
-//     //debug: show the energies
-//     Mat acost(rows,cols,CV_32FC1);
-//     float* ap=acost.ptr<float>(0);
-//     for(st point=0;point<w*h;point++){
-//         aBasic(data+point*l,l,ds,d[point],ap[point]);
-//     }
-//     pfShow("A Energy: ", acost,0,Vec2d(0,1e-6));
-//     float Ed=sum(acost)[0];
-//     float Ee=sum(_qx.mul(_qx)/2*epsilon)[0];
-//     
-//     cout<<"Data Energy: "<<Ed<<endl;
-//     cout<<"Elastic Energy: "<<Ee<<endl;
-//     cout<<"Total Energy: "<<Ed+Ee<<endl;
 }
 
-
-
-
 static void __attribute__ ((noinline)) qcore(
-    const float denom,
-    st point, 
-    const st pstop, 
-    float* kx,
-    float* ky,
+    const float denom, st point, const st pstop, 
+    float* kx, float* ky,
     const float* d,
-    const float* gd,
-    const float* gu,
-    const float* gl,
-    const float* gr,
+    const float* gd, const float* gu, const float* gl, const float* gr,
     const float& sigma_q,
-    const unsigned& w){
+    const unsigned& w)
+{
     float nm,pd,kxn,kyn;
     for (;point<pstop;point++){
         //Unnumbered Eq.s at end of section 2.2.3
@@ -521,7 +427,5 @@ static void __attribute__ ((noinline)) qcore(
         pd=std::max(1.0f,nm);
         kx[here]=kxn/pd;
         ky[here]=kyn/pd;
-        //kx[here]=d[here]-d[right];
     }
-    
 }

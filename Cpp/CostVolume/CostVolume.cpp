@@ -2,7 +2,6 @@
 // use unless incorporated in OpenCV. 
 // Inherits OpenCV License if in OpenCV.
 
-
 #include "CostVolume.hpp"
 #include "CostVolume.cuh"
 
@@ -15,14 +14,9 @@
 #include "graphics.hpp"
 #include <iostream>
 
-
 using namespace std;
 using namespace cv;
 using namespace cv::gpu;
-
-
-
-
 
 void CostVolume::solveProjection(const cv::Mat& R, const cv::Mat& T) {
     Mat P;
@@ -97,20 +91,9 @@ CostVolume::CostVolume(Mat image, FrameID _fid, int _layers, float _near,
     
 }
 
-
-
-// static cudaArray* cuArray=0;
-// static cudaTextureObject_t texObj=0;
-
 void CostVolume::simpleTex(const Mat& image,Stream cvStream){
     cudaArray*& cuArray=*((cudaArray**)(char*)_cuArray);
     cudaTextureObject_t& texObj=*((cudaTextureObject_t*)(char*)_texObj);
-    
-//     cudaArray*& cuArray=*((cudaArray**)((char*)_cuArray));
-//     if(!_texObj){
-//         _texObj=Ptr<char>((char*)new cudaTextureObject_t);
-//     }
-//     cudaTextureObject_t texObj=*(cudaTextureObject_t*)(char*)_texObj;
     assert(image.isContinuous());
     assert(image.type()==CV_8UC4);
     
@@ -235,23 +218,6 @@ void CostVolume::updateCost(const Mat& _image, const cv::Mat& R, const cv::Mat& 
                          p[4], p[6], p[7]+y*p[5],
                          p[8], p[10], p[11]+y*p[9]};
 
-
-
-//        //kernel updates slice (1 block?)
-//        updateCostColCaller(cols,1, y, sliceToIm);
-//        passThroughCaller(cols,rows);
-//        cudaSafeCall( cudaDeviceSynchronize() );
-            //per thread:
-                //find projection from column to image (3x2)
-                //for each pixel:
-                    //finds L1 error
-                    //blend in with old value
-                    //if low
-                        //update low index
-                        //update high value
-                    //if high
-                        //update high value
-                //save results
     }
     double *p = (double*)imFromCV.data;
     m34 persp;
@@ -259,19 +225,11 @@ void CostVolume::updateCost(const Mat& _image, const cv::Mat& R, const cv::Mat& 
 #define CONST_ARGS rows, cols, layers, rows*cols, \
             hits,  data, (float*) (lo.data), (float*) (hi.data), (float*) (loInd.data),\
             (float3*) (baseImage.data), (float*)baseImage.data, texObj
-        //    uint  rows, uint  cols, uint  layers, uint layerStep, float* hdata, float* cdata, float* lo, float* hi, float* loInd, float3* base,  float* bf, cudaTextureObject_t tex);
-//    passThroughCaller(CONST_ARGS);
-//    perspCaller(CONST_ARGS);
-//    volumeProjectCaller(persp,CONST_ARGS);
-//    simpleCostCaller(persp,CONST_ARGS);
-//    globalWeightedCostCaller(persp,.3,CONST_ARGS);
     float w=count+++initialWeight;//fun parse
     w/=(w+1); 
     assert(localStream);
     globalWeightedBoundsCostCaller(persp,w,CONST_ARGS);
-
 }
-
 
 CostVolume::~CostVolume(){
     cudaArray*& cuArray=*((cudaArray**)(char*)_cuArray);

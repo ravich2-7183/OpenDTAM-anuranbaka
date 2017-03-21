@@ -55,6 +55,7 @@ void DepthmapDenoiseWeightedHuberImpl::allocate(int rows, int cols)
     alloced=true;
 }
 
+// TODO this should be called only once
 void DepthmapDenoiseWeightedHuberImpl::computeSigmas(float epsilon, float theta)
 {
     /*
@@ -142,6 +143,7 @@ GpuMat DepthmapDenoiseWeightedHuberImpl::operator()(InputArray _ain, float epsil
     rows=ain.rows;
     cols=ain.cols;
     
+    // TODO this should be called only once
     if(!ain.isContinuous()) {
         _a.create(1,rows*cols, CV_32FC1);
         _a=_a.reshape(0,rows);

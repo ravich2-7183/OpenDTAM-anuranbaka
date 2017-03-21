@@ -4,6 +4,8 @@ project(OpenDTAM)
 set(CMAKE_BUILD_TYPE Debug) 
 cmake_policy(SET CMP0012 NEW)
 
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
+
 # ROS setup
 include($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
 rosbuild_init()
@@ -11,7 +13,9 @@ set(EXECUTABLE_OUTPUT_PATH ${CMAKE_SOURCE_DIR}/build)
 set(LIBRARY_OUTPUT_PATH ${CMAKE_SOURCE_DIR}/build)
 
 set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g -ggdb ")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g -ggdb -fprofile-arcs -ftest-coverage")
+#set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g -ggdb ")
+set(CMAKE_CXX_FLAGS "-g -O0 -fprofile-arcs -ftest-coverage")
 
 find_package(OpenCV 2.4.9 EXACT REQUIRED)
 find_package(Qt5Core REQUIRED)
@@ -55,6 +59,8 @@ target_link_libraries(OpenDTAM_L ${OpenCV_LIBS})
 # rosbuild_add_executable(${PROJECT_NAME} Cpp/dense-mapping-orbslam-tracking.cpp Cpp/convertAhandaPovRayToStandard.cpp Cpp/graphics.cpp)
 # target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBS} OpenDTAM_L ${Boost_LIBRARIES})
 
-add_executable(a.out Cpp/testmapper.cpp Cpp/convertAhandaPovRayToStandard.cpp Cpp/graphics.cpp)
-target_link_libraries(a.out ${OpenCV_LIBS} OpenDTAM_L ${Boost_LIBRARIES})
+add_executable(testmapper Cpp/testmapper.cpp Cpp/convertAhandaPovRayToStandard.cpp Cpp/graphics.cpp)
+target_link_libraries(testmapper ${OpenCV_LIBS} OpenDTAM_L ${Boost_LIBRARIES})
 
+INCLUDE(CodeCoverage)
+SETUP_TARGET_FOR_COVERAGE(my_coverage_target testmapper coverage)
