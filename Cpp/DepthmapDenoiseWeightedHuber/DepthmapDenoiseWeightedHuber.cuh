@@ -1,8 +1,9 @@
-
 #ifndef COSTVOLUME_CUH
 #define COSTVOLUME_CUH
 #include <opencv2/gpu/device/common.hpp>//for cudaStream_t
 namespace cv { namespace gpu { namespace device { namespace dtam_denoise{
+
+extern cudaStream_t localStream;
 
 void computeGCaller(float* img, float* g,
                     int width, int height, int pitch,
@@ -13,8 +14,6 @@ void update_q_dCaller(float *g, float *a,  // const input
                       int width, int height, // dimensions
                       float sigma_q, float sigma_d, float epsilon, float theta // parameters
                       );
-
-
 
 }}}}
 #endif

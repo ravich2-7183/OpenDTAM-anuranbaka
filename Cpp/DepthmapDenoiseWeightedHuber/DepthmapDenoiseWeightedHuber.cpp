@@ -43,10 +43,11 @@ void DepthmapDenoiseWeightedHuberImpl::allocate(int rows, int cols)
     if(!_a.data){
         _a.create(1,rows*cols, CV_32FC1);
         _a=_a.reshape(0, rows);
-
-        _q.create(1, 2*rows*cols, CV_32FC1);
-        _q=_q.reshape(0, 2*rows);
     }
+    
+    _q.create(1, 2*rows*cols, CV_32FC1);
+    _q = _q.reshape(0, 2*rows);
+    _q = 0.0f;
     
     CONTINUOUS_ALLOC(_d, _a);
     CONTINUOUS_ALLOC(_g, _a);
@@ -98,18 +99,19 @@ void DepthmapDenoiseWeightedHuberImpl::computeSigmas(float epsilon, float theta)
     */
   
     //lower is better(longer steps), but in theory only >=4 is guaranteed to converge. For the adventurous, set to 2 or 1.44        
-    float L=4;
+    float L=4.0;
     
     float lambda = 1.0/theta;
     float alpha  = epsilon;
     
-    float mu = 2.0*sqrt(lambda*alpha)/L;
+    float mu = 2.0*std::sqrt(lambda*alpha)/L;
 
     sigma_d = mu/(2.0*lambda);
     sigma_q = mu/(2.0*alpha);
 }
 
-void DepthmapDenoiseWeightedHuberImpl::cacheGValues(InputArray visibleLightImage){
+void DepthmapDenoiseWeightedHuberImpl::cacheGValues(InputArray _visibleLightImage)
+{
     using namespace cv::gpu::device::dtam_denoise;
 
     localStream = cv::gpu::StreamAccessor::getStream(cvStream);
@@ -118,20 +120,21 @@ void DepthmapDenoiseWeightedHuberImpl::cacheGValues(InputArray visibleLightImage
     if(!alloced)
         allocate(rows,cols);
 
-    if(!visibleLightImage.empty()) {
-        img = visibleLightImage.getGpuMat();
+    if(!_visibleLightImage.empty()) {
+        visibleLightImage = _visibleLightImage.getGpuMat();
         cachedG=false;
     }
     if(cachedG)
         return;
     
     // Call the gpu function for caching g's
-    computeGCaller((float*)img.data, (float*)_g.data, cols, rows, img.step);
+    computeGCaller((float*)visibleLightImage.data, (float*)_g.data, cols, rows, visibleLightImage.step);
 
     cachedG=true;
 }
 
-GpuMat DepthmapDenoiseWeightedHuberImpl::operator()(InputArray _ain, float epsilon, float theta){
+GpuMat DepthmapDenoiseWeightedHuberImpl::operator()(InputArray _ain, float epsilon, float theta)
+{
     const GpuMat& ain=_ain.getGpuMat();
     
     using namespace cv::gpu::device::dtam_denoise;
@@ -139,7 +142,7 @@ GpuMat DepthmapDenoiseWeightedHuberImpl::operator()(InputArray _ain, float epsil
     rows=ain.rows;
     cols=ain.cols;
     
-    if(ain.empty || !ain.isContinuous()){
+    if(!ain.isContinuous()) {
         _a.create(1,rows*cols, CV_32FC1);
         _a=_a.reshape(0,rows);
         cvStream.enqueueCopy(ain,_a);
@@ -147,24 +150,18 @@ GpuMat DepthmapDenoiseWeightedHuberImpl::operator()(InputArray _ain, float epsil
     else {
         _a=ain;
     }
-    
-    if(!alloced){
+
+    // TODO see if there's a better place to do this just once 
+    if(!alloced) 
         allocate(rows,cols);
-    } 
-    
-    // TODO fix the visibleLightImage snafu
-    if(!visibleLightImage.empty())
+    if(!cachedG && !visibleLightImage.empty())
         cacheGValues();
-    if(!cachedG){
-        _g=1.0f;
-    }
-    if(!dInited){
+    if(!dInited) {
         cvStream.enqueueCopy(_a,_d);
-        // TODO is the right place to do this?
-        _q = 0.0f;
         dInited=true;
     }
-    
+
+    // TODO should these be computed everytime?
     computeSigmas(epsilon,theta);
     
     update_q_dCaller((float*)_g.data, (float*)_a.data,  // const input
@@ -175,7 +172,7 @@ GpuMat DepthmapDenoiseWeightedHuberImpl::operator()(InputArray _ain, float epsil
     cudaSafeCall(cudaGetLastError());
     return _d;
 }
-}  
-}
+
+}}
 
 

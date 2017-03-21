@@ -7,18 +7,17 @@ nbproject/
 .settings/
 *.o
 *.out
+*.png
 *~
 *.kdev*
 *kate-swp*
 TOOLBOX_calib\ 2/
 testims/
 Cpp/ProjectTfFrameToImage.cpp
-Cpp/forked-opendtam.config
-Cpp/forked-opendtam.creator
-Cpp/forked-opendtam.creator.user
-Cpp/forked-opendtam.creator.user.1f2cae2
-Cpp/forked-opendtam.files
-Cpp/forked-opendtam.includes
+*.config
+*.creator*
+*.files
+*.includes
 Trajectory_30_seconds.bag
 ahanda_tf.txt
 orb_slam_tf.txt

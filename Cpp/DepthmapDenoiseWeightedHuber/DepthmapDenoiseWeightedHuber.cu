@@ -4,6 +4,8 @@
 
 namespace cv { namespace gpu { namespace device { namespace dtam_denoise{
 
+cudaStream_t localStream=0;
+
 static __global__ void computeG(float* g, float* img, int w, int h, float alpha=3.5f, float beta=1.0f)
 {
   // thread coordinates

@@ -1,10 +1,11 @@
 
-add_sources(    Cost.cpp 
-                utils/reproject.cpp 
-                optimizer.part.cpp
-                utils/reprojectCloud.cpp
-                CostVolume.cpp CostVolume.cu
-                ../gpu/ArrayTexture.cpp)
+add_sources(Cost.cpp 
+            optimizer.part.cpp
+            CostVolume.cpp
+			CostVolume.cu
+            utils/reprojectCloud.cpp
+            utils/reproject.cpp 
+            ../gpu/ArrayTexture.cpp)
 
 
 
