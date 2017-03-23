@@ -2,7 +2,6 @@
 // use unless incorporated in OpenCV. 
 // Inherits OpenCV Licence if in OpenCV.
 
-
 #ifndef OPTIMIZER_H
 #define OPTIMIZER_H
 #include "CostVolume/CostVolume.hpp"
@@ -29,6 +28,7 @@ public:
     cv::gpu::GpuMat _d,_a;
     cv::gpu::GpuMat stableDepth;
     float getTheta(){return theta;}
+    
 private:
     void allocate();
     void initA();
@@ -44,8 +44,6 @@ private:
     cv::Ptr<char> stableDepthReady;//really a void*
 public:
     cv::gpu::Stream cvStream;
-
-    
 };
 
 #endif // OPTIMIZER_H

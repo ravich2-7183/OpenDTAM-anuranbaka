@@ -10,10 +10,9 @@
 #define __device__
 #endif
 
-namespace cv { namespace gpu { namespace device {
-    namespace dtam_optimizer{
+namespace cv { namespace gpu { namespace device { namespace dtam_optimizer{
 
-static unsigned int arows,acols;
+static unsigned int arows, acols;
 
 #define SEND(type,sym) cudaMemcpyToSymbol(sym, &h_ ## sym, sizeof(type));
 

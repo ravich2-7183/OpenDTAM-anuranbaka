@@ -3,28 +3,12 @@
 #include <opencv2/core/core.hpp>
 #include "CostVolume.cuh"
 
-
-
-namespace cv { namespace gpu { namespace device {
-    namespace dtam_updateCost{
+namespace cv { namespace gpu { namespace device { namespace dtam_updateCost{
 
 cudaStream_t localStream;
 
 #define CONSTT uint  rows, uint  cols, uint  layers, uint layerStep, float* hdata, float* cdata, float* lo, float* hi, float* loInd, float3* base,  float* bf, cudaTextureObject_t tex
 #define CONSTS rows,  cols,  layers, layerStep,  hdata,  cdata,  lo, hi,  loInd,  base,   bf,  tex
-
-#define BLOCK_X 64
-#define BLOCK_Y 4
-__global__ void globalWeightedBoundsCost(m34 p,float weight, CONSTT);
-void globalWeightedBoundsCostCaller(m34 p,float weight,CONSTT){
-   dim3 dimBlock(BLOCK_X,BLOCK_Y);
-   dim3 dimGrid((cols  + dimBlock.x - 1) / dimBlock.x,
-                (rows + dimBlock.y - 1) / dimBlock.y);
-   globalWeightedBoundsCost<<<dimGrid, dimBlock, 0, localStream>>>(p, weight,CONSTS);
-   assert(localStream);
-   cudaSafeCall( cudaGetLastError() );
-}
-
 
 __global__ void globalWeightedBoundsCost(m34 p,float weight, CONSTT)
 {
@@ -64,11 +48,16 @@ __global__ void globalWeightedBoundsCost(m34 p,float weight, CONSTT)
     hi[offset]=maxv;
 }
 
+#define BLOCK_X 64
+#define BLOCK_Y 4
 
-// ...... see original
+void globalWeightedBoundsCostCaller(m34 p,float weight,CONSTT){
+   dim3 dimBlock(BLOCK_X,BLOCK_Y);
+   dim3 dimGrid((cols  + dimBlock.x - 1) / dimBlock.x,
+                (rows + dimBlock.y - 1) / dimBlock.y);
+   globalWeightedBoundsCost<<<dimGrid, dimBlock, 0, localStream>>>(p, weight,CONSTS);
+   assert(localStream);
+   cudaSafeCall( cudaGetLastError() );
+}
 
 }}}}
-
-
-
-

@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 #include "convertAhandaPovRayToStandard.h"
-#include "CostVolume/Cost.h"
+// #include "CostVolume/Cost.h"
 #include "CostVolume/CostVolume.hpp"
 #include "Optimizer/Optimizer.hpp"
 #include "DepthmapDenoiseWeightedHuber/DepthmapDenoiseWeightedHuber.hpp"
@@ -75,7 +75,8 @@ void App_main()
             bool doneOptimizing;
             do {
               for(int i = 0; i < 10; i++) {
-                d=denoiser(a, optimizer.epsilon, optimizer.getTheta()); }
+                d=denoiser(a, optimizer.epsilon, optimizer.getTheta());
+              }
               d.download(ret);
               pfShow("D function", ret, 0, cv::Vec2d(0, layers));
               

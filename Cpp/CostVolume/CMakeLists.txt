@@ -1,7 +1,6 @@
-
-add_sources(Cost.cpp 
-            optimizer.part.cpp
-            CostVolume.cpp
+# Cost.cpp 
+# optimizer.part.cpp
+add_sources(CostVolume.cpp
 			CostVolume.cu
             utils/reprojectCloud.cpp
             utils/reproject.cpp 

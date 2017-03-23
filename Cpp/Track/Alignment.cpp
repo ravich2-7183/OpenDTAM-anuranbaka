@@ -10,21 +10,10 @@ using namespace std;
 #include "utils/utils.hpp"
 
 
-
-
-
-
-
 const static float FAIL_FRACTION=0.30;
-
 enum alignment_modes{CV_DTAM_REV,CV_DTAM_FWD,CV_DTAM_ESM};
 const double small0=.1;//~6deg, not trivial, but hopefully enough to make the translation matter
-
 static void getGradient(const Mat& image,Mat & grad);
-
-
-
-
 
 static Mat paramsToProjection(const Mat & p,const Mat& _cameraMatrix){
     //Build the base transform
@@ -48,8 +37,6 @@ static Mat paramsToProjection(const Mat & p,const Mat& _cameraMatrix){
     return proj;
 }
 
-
-
 static void getGradient(const Mat& image,Mat & grad){
     //Image gradients for alignment
     //Note that these gradients have theoretical problems under the sudden 
@@ -69,7 +56,6 @@ static void getGradient(const Mat& image,Mat & grad){
     Mat grad_y(image.rows,image.cols,CV_32FC1,grad.row(1).data);
     Scharr( gray, grad_y, CV_32FC1, 0, 1, 1.0/26.0, 0, BORDER_REPLICATE);
 }
-
 static void getGradient_8(const Mat& image,Mat & grad){
     //Image gradients for alignment
     //Note that these gradients have theoretical problems under the sudden 
@@ -89,7 +75,6 @@ static void getGradient_8(const Mat& image,Mat & grad){
     Mat grad_y(image.rows,image.cols,CV_32FC1,grad.row(1).data);
     Scharr( gray, grad_y, CV_32FC1, 0, 1, 1.0/26.0, 0, BORDER_REPLICATE);
 }
-
 static void getGradientInterleave(const Mat& image,Mat & grad){
     //Image gradients for alignment
     //Note that these gradients have theoretical problems under the sudden 
@@ -119,7 +104,6 @@ static void Mask(const Mat& in,const Mat& m,Mat& out){
     out=out.mul(tmp/255);
 }
 
-
 static bool align_level_largedef_gray_forward(const Mat& T,//Total Mem cost ~185 load/stores of image
                           const Mat& d,
                           const Mat& _I,
@@ -130,7 +114,6 @@ static bool align_level_largedef_gray_forward(const Mat& T,//Total Mem cost ~185
                           int numParams
                                       )
 {
-
     int r=_I.rows;
     int rows=r;
     int c=_I.cols;
@@ -190,7 +173,6 @@ static bool align_level_largedef_gray_forward(const Mat& T,//Total Mem cost ~185
         
         remap( packed, pulledBack, baseMap,Mat(), CV_INTER_LINEAR, BORDER_CONSTANT,0.0 );//(Mem cost:?? 5load, 3 store:8)
         gradI.create(r,c,CV_32FC2);
-
         int from_to[] = { 0,0, 1,1, 2,2 };
         Mat src[1]=pulledBack;
         Mat dst[2]={I,gradI};
@@ -317,7 +299,6 @@ static bool align_level_largedef_gray_forward(const Mat& T,//Total Mem cost ~185
     Mat Hinv=small*Hss.inv(DECOMP_SVD);  //TODO:cacheable for CV_DTAM_REV 
     Hinv.convertTo(Hinv,CV_32FC1);
     err=err.reshape(0,r*c);
-
     Mat dp=(Hinv*(Jsmall*err)).t();//transpose because we decided that p is row vector (Mem cost 7)
     dp.convertTo(dp,CV_64FC1);
 //     cout<<"Je: \n"<<Jsmall*err<<endl;
@@ -352,16 +333,6 @@ static bool align_level_largedef_gray_forward(const Mat& T,//Total Mem cost ~185
     _p.colRange(0,numParams)+=dp;
     return true;
 }
-
-
-
-
-
-
-
-
-
-
 
 // void align_level_largedef(const Mat& T,
 //                           const Mat& d,
@@ -534,10 +505,6 @@ static bool align_level_largedef_gray_forward(const Mat& T,//Total Mem cost ~185
 
 
 
-
-
-
-
 // void align_level_smalldef(const Mat& T,
 //                           const Mat& d,
 //                           const Mat& I,
@@ -668,10 +635,6 @@ static bool align_level_largedef_gray_forward(const Mat& T,//Total Mem cost ~185
 //     dp.convertTo(dp,CV_64FC1);
 //     _p+=dp;
 // }
-
-
-
-
 
 
 // void align_level_largedef(const Mat& T,

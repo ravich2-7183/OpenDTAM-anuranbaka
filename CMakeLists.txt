@@ -42,7 +42,7 @@ endmacro(add_sources)
 set(BASEPATH "${CMAKE_SOURCE_DIR}/Cpp")
 
 add_subdirectory(Cpp/CostVolume)
-add_subdirectory(Cpp/Track)
+# add_subdirectory(Cpp/Track)
 add_subdirectory(Cpp/Optimizer)
 add_subdirectory(Cpp/DepthmapDenoiseWeightedHuber)
 add_subdirectory(Cpp/utils)
