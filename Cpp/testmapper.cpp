@@ -20,7 +20,7 @@ void App_main()
 {
     pthread_setname_np(pthread_self(), "App_main");
 
-    const int    numImg              = 20;
+    const int    numImg              = 50;
     const int    imagesPerCV         = 5;
     const int    layers              = 32;
     const float  near                = 0.010f;

@@ -71,7 +71,7 @@ bool Optimizer::optimizeA(const cv::gpu::GpuMat _d, cv::gpu::GpuMat _a)
                   (float*)_a.data, (float*)_d.data, cv.data,
                   (float*)cv.lo.data, (float*)cv.hi.data, (float*)cv.loInd.data);
    
-    minimizeACaller(cv.data, (float*)_a.data, (float*)_d.data, cv.layers, theta, lambda);
+    minimizeANewCaller(cv.data, (float*)_a.data, (float*)_d.data, cv.layers, theta, lambda);
     
     theta *= thetaStep;
     

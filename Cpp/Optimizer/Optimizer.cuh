@@ -13,6 +13,8 @@ namespace cv { namespace gpu { namespace device { namespace dtam_optimizer{
                 float* h_a, float* h_d, float* h_cdata, float* h_lo, float* h_hi,
                 float* h_loInd);
     void minimizeACaller(float*cdata,float*a, float* d, int layers,float theta,float lambda);
+    void minimizeANewCaller(float*cdata,float*a, float* d, int layers,float theta,float lambda);
+    void minimizeAOldCaller(float*cdata,float*a, float* d, int layers,float theta,float lambda);
     
     extern cudaStream_t localStream;
 }}}}
