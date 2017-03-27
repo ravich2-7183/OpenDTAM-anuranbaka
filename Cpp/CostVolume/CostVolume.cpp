@@ -126,62 +126,53 @@ void CostVolume::simpleTex(const Mat& image,Stream cvStream)
    //return texObj;
 }
 
-void CostVolume::updateCost(const Mat& _image, const cv::Mat& R, const cv::Mat& T) {
+void CostVolume::preprocessImage(const Mat& inImage, Mat& outImage)
+{
+    outImage = inImage; //copy only header
+    if(inImage.type()!=CV_8UC4 || !inImage.isContinuous()) {
+        if(!inImage.isContinuous() && inImage.type()==CV_8UC4) {
+            cBuffer.create(inImage.rows,inImage.cols,CV_8UC4);
+            outImage=cBuffer;//.createMatHeader();
+            inImage.copyTo(outImage);//copies data
+        }
+        if(inImage.type()!=CV_8UC4) {
+            cBuffer.create(inImage.rows,inImage.cols,CV_8UC4);
+            Mat cm=cBuffer;//.createMatHeader();
+            if(inImage.type()==CV_8UC1||inImage.type()==CV_8SC1) {
+                cvtColor(inImage,cm,CV_GRAY2BGRA);
+            }else if(inImage.type()==CV_8UC3||inImage.type()==CV_8SC3) {
+                cvtColor(inImage,cm,CV_BGR2BGRA);
+            }else{
+                outImage=inImage;
+                if(inImage.channels()==1) {
+                    cvtColor(outImage,outImage,CV_GRAY2BGRA);
+                }
+                if(inImage.channels()==3) {
+                    cvtColor(outImage,outImage,CV_BGR2BGRA);
+                }
+                //outImage is now 4 channel, unknown depth but not 8 bit
+                if(inImage.depth()>=5) {//float
+                    outImage.convertTo(cm,CV_8UC4,255.0);
+                }else if(outImage.depth()>=2) {//0-65535
+                    outImage.convertTo(cm,CV_8UC4,1/256.0);
+                }
+            }
+            outImage=cm;
+        }
+    }
+    CV_Assert(outImage.type()==CV_8UC4);
+}
+
+void CostVolume::updateCost(const Mat& _image, const cv::Mat& R, const cv::Mat& T)
+{
     using namespace cv::gpu::device::dtam_updateCost;
     localStream = cv::gpu::StreamAccessor::getStream(cvStream);
+    assert(localStream);
+    assert(baseImage.isContinuous() && lo.isContinuous() && hi.isContinuous() && loInd.isContinuous());
     
-    // 0  1  2  3
-    // 4  5  6  7
-    // 8  9  10 11
-    // 12 13 14 15
-    //
-    // 0 1 2
-    // 3 4 5
-    // 6 7 8
-    //
-    // want cudaReadModeNormalizedFloat for auto convert to [0,1]
-    // cudaAddressModeClamp
-    // cudaFilterModeLinear
-    //
-    // make sure we modify the cameraMatrix to take into account the texture coordinates
-    //
     Mat image;
-    {
-      image=_image;//no copy
-        if(_image.type()!=CV_8UC4 || !_image.isContinuous()) {
-            if(!_image.isContinuous()&&_image.type()==CV_8UC4) {
-                cBuffer.create(_image.rows,_image.cols,CV_8UC4);
-                image=cBuffer;//.createMatHeader();
-                _image.copyTo(image);//copies data
-            }
-            if(_image.type()!=CV_8UC4) {
-                cBuffer.create(_image.rows,_image.cols,CV_8UC4);
-                Mat cm=cBuffer;//.createMatHeader();
-                if(_image.type()==CV_8UC1||_image.type()==CV_8SC1) {
-                    cvtColor(_image,cm,CV_GRAY2BGRA);
-                }else if(_image.type()==CV_8UC3||_image.type()==CV_8SC3) {
-                    cvtColor(_image,cm,CV_BGR2BGRA);
-                }else{
-                    image=_image;
-                    if(_image.channels()==1) {
-                        cvtColor(image,image,CV_GRAY2BGRA);
-                    }
-                    if(_image.channels()==3) {
-                        cvtColor(image,image,CV_BGR2BGRA);
-                    }
-                    //image is now 4 channel, unknown depth but not 8 bit
-                    if(_image.depth()>=5) {//float
-                        image.convertTo(cm,CV_8UC4,255.0);
-                    }else if(image.depth()>=2) {//0-65535
-                        image.convertTo(cm,CV_8UC4,1/256.0);
-                    }
-                }
-                image=cm;
-            }
-        }
-        CV_Assert(image.type()==CV_8UC4);
-    }
-    
+    preprocessImage(_image, image);
+        
     //change input image to a texture
     simpleTex(image,cvStream);
     cudaTextureObject_t& texObj=*((cudaTextureObject_t*)(char*)_texObj);
@@ -193,42 +184,25 @@ void CostVolume::updateCost(const Mat& _image, const cv::Mat& R, const cv::Mat& 
     Mat cameraMatrixTex(3,4,CV_64FC1);
     cameraMatrixTex=0.0;
     cameraMatrix.copyTo(cameraMatrixTex(Range(0,3),Range(0,3)));
-    cameraMatrixTex(Range(0,2), Range(2,3)) += 0.5; // add 0.5 to x,y out, removing causes crash
+    cameraMatrixTex(Range(0,2), Range(2,3)) += 0.5; // add 0.5 to x, y out. removing causes crash!
 
-    Mat imFromWorld=cameraMatrixTex*viewMatrixImage;//3x4
+    Mat imFromWorld=cameraMatrixTex*viewMatrixImage; // 3x4
     Mat imFromCV=imFromWorld*projection.inv();
-    
     imFromCV.colRange(2,3)*=depthStep;
     
-    assert(baseImage.isContinuous());
-    assert(lo.isContinuous());
-    assert(hi.isContinuous());
-    assert(loInd.isContinuous());
-    
     //for each slice
-    for(int y=0; y<rows; y++) {
-        //find projection from slice to image (3x3)
-        double *p = (double*)imFromCV.data;
-        m33 sliceToIm={  p[0], p[2], p[3]+y*p[1],
-                         p[4], p[6], p[7]+y*p[5],
-                         p[8], p[10], p[11]+y*p[9]};
-    }
     double *p = (double*)imFromCV.data;
     m34 persp;
-    for(int i=0;i<12;i++) {
+    for(int i=0;i<12;i++)
       persp.data[i]=p[i];
-    }
 
-    assert(localStream);
-    
-    float w=count++ + initialWeight; //fun parse
+    float w=count++ + initialWeight;
     w/=(w+1); 
 
-#define CONST_ARGS rows, cols, layers, rows*cols,                       \
-      hits, data, (float*)(lo.data), (float*)(hi.data), (float*)(loInd.data), \
-      (float3*)(baseImage.data), (float*)baseImage.data, texObj
-
-    globalWeightedBoundsCostCaller(persp, w, CONST_ARGS);
+    globalWeightedBoundsCostCaller(persp, w, rows, cols, layers, rows*cols, hits, data,
+                                   (float*)(lo.data), (float*)(hi.data), (float*)(loInd.data),
+                                   (float3*)(baseImage.data), (float*)baseImage.data,
+                                   texObj);
 }
 
 CostVolume::~CostVolume() {

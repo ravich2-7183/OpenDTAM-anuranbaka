@@ -10,7 +10,7 @@ cudaStream_t localStream;
 #define CONSTT uint  rows, uint  cols, uint  layers, uint layerStep, float* hdata, float* cdata, float* lo, float* hi, float* loInd, float3* base,  float* bf, cudaTextureObject_t tex
 #define CONSTS rows,  cols,  layers, layerStep,  hdata,  cdata,  lo, hi,  loInd,  base,   bf,  tex
 
-__global__ void globalWeightedBoundsCost(m34 p,float weight, CONSTT)
+__global__ void globalWeightedBoundsCost(m34 p, float weight, CONSTT)
 {
     //float*bf=(float*)base;
     unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;

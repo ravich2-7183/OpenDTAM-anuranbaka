@@ -38,7 +38,8 @@ void App_main()
 
     cv::gpu::Stream s;
     int idx = 0;
-    for(int i=0; i < numImg; i++){
+    for(int i=0; i < numImg; i++)
+    {
         sprintf(filename, "../Trajectory_30_seconds/scene_%03d.png", i);
         printf("Opening: %s \n", filename);
         imread(filename, -1).convertTo(image, CV_32FC3, 1.0/65535.0);
@@ -58,7 +59,7 @@ void App_main()
         if(costvolume.count < imagesPerCV){
             costvolume.updateCost(image, R, T); // increments costvolume.count
         }
-        else{ //Attach optimizer
+        else { //Attach optimizer
             Optimizer optimizer(costvolume);
             optimizer.initOptimization();
             s=optimizer.cvStream;
@@ -74,24 +75,25 @@ void App_main()
 
             bool doneOptimizing;
             do {
-              for(int i = 0; i < 10; i++) {
-                d=denoiser(a, optimizer.epsilon, optimizer.getTheta());
-              }
+              d=denoiser(a, optimizer.epsilon, optimizer.getTheta());
+              doneOptimizing=optimizer.optimizeA(d,a);
+              
               d.download(ret);
               pfShow("D function", ret, 0, cv::Vec2d(0, layers));
-              
-              doneOptimizing=optimizer.optimizeA(d,a);
               a.download(ret);
               pfShow("A function", ret, 0, cv::Vec2d(0, layers));
             }while(!doneOptimizing);
+
+            cv::waitKey(0);
 
             optimizer.lambda=0.01f;
             optimizer.optimizeA(d,a);
             optimizer.cvStream.waitForCompletion();
 
             // reset costvolume
-            idx += imagesPerCV;
             is_costvolume_initialized = false;
+            
+            idx += imagesPerCV;
         }
         s.waitForCompletion(); // so we don't lock the whole system up forever
     }

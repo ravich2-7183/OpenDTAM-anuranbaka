@@ -63,6 +63,7 @@ private:
     void checkInputs(const cv::Mat& R, const cv::Mat& T,
             const cv::Mat& _cameraMatrix);
     void simpleTex(const cv::Mat& image,cv::gpu::Stream cvStream=cv::gpu::Stream::Null());
+    void preprocessImage(const cv::Mat& inImage, cv::Mat& outImage);
 
 private:
     //temp variables ("static" containers)

@@ -64,7 +64,7 @@ GENERATE_CUDA_FUNC1D(minimizeANew,
         return;
     }
     
-    // sublayer sampling using best fit parabola with the 2 points around (mini, minc)
+    // sublayer sampling as the minimum of the parabola with the 2 points around (mini, minc)
     float A = Eaux(theta, di, mini-1, lambda, cdata[i+(mini-1)*layerStep]);
     float B = minc;
     float C = Eaux(theta, di, mini+1, lambda, cdata[i+(mini+1)*layerStep]);
