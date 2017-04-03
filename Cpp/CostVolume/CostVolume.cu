@@ -12,40 +12,44 @@ cudaStream_t localStream;
 
 __global__ void globalWeightedBoundsCost(m34 p, float weight, CONSTT)
 {
-    //float*bf=(float*)base;
-    unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
-
-    float xf=x;
-    float yf=y;
-    unsigned int offset=x+y*cols;
-
-    float3 B = base[x+y*cols];//Known bug:this requires 12 loads instead of 4 because of stupid memory addressing, can't really fix
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    const int i = x + y*cols;
+    
+    const float xf = x;
+    const float yf = y;
+    
+    //Known bug:this requires 12 loads instead of 4 because of stupid memory addressing, can't really fix
+    float3 B = base[i];
+    
+    float xi = p.data[0]*xf + p.data[1]*yf + p.data[3];
+    float yi = p.data[4]*xf + p.data[5]*yf + p.data[7];
     float wi = p.data[8]*xf + p.data[9]*yf + p.data[11];
-    float xi = (p.data[0]*xf + p.data[1]*yf + p.data[3]);
-    float yi = (p.data[4]*xf + p.data[5]*yf + p.data[7]);
-    float minv=1000.0,maxv=0.0;
-    float mini=0;
-    for(unsigned int z=0;z<layers;z++){
-        float c0=cdata[offset+z*layerStep];
-        float wiz = wi+p.data[10]*z;
-        float xiz = xi+p.data[2] *z;
-        float yiz = yi+p.data[6] *z;
+    
+    int   mini = 0;
+    float minv = 1000.0, maxv = 0.0;
+    for(int z=0; z<layers; z++) {
+        float xiz = xi + p.data[2] *z;
+        float yiz = yi + p.data[6] *z;
+        float wiz = wi + p.data[10]*z;
+        
         float4 c = tex2D<float4>(tex, xiz/wiz, yiz/wiz);
         float v1 = fabsf(c.x - B.x);
         float v2 = fabsf(c.y - B.y);
         float v3 = fabsf(c.z - B.z);
-        float ns=c0*weight+(v1+v2+v3)*(1-weight);
-        cdata[offset+z*layerStep]=ns;
-        if (ns < minv) {
-        minv = ns;
-        mini = z;
+        
+        float c0 = cdata[i+z*layerStep];
+        float ns = c0*weight + (v1+v2+v3)*(1-weight);
+        cdata[i+z*layerStep] = ns;
+        if(ns < minv) {
+            minv = ns;
+            mini = z;
         }
-        maxv=fmaxf(ns,maxv);
+        maxv = fmaxf(ns, maxv);
     }
-    lo[offset]=minv;
-    loInd[offset]=mini;
-    hi[offset]=maxv;
+    lo[i]    = minv;
+    loInd[i] = float(mini);
+    hi[i]    = maxv;
 }
 
 #define BLOCK_X 64

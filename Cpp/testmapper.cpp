@@ -26,8 +26,14 @@ void App_main()
     const float  near                = 0.010f;
     const float  far                 = 0.0f;
 
+   /* Mat cameraMatrix=(Mat_<double>(3,3) << 480,0.0,320.5,
+										    0.0,480.0,240.5,
+										    0.0,0.0,1.0);*/
+    Mat cameraMatrix=(Mat_<double>(3,3) << 481.20,  0.0, 319.5,
+                                             0.0, 480.0, 239.5,
+                                             0.0,   0.0,   1.0);
+    
     char filename[500];
-    Mat cameraMatrix;
     Mat image, R, T;
 
     CostVolume costvolume;
@@ -45,7 +51,7 @@ void App_main()
         imread(filename, -1).convertTo(image, CV_32FC3, 1.0/65535.0);
 
         convertAhandaPovRayToStandard("../Trajectory_30_seconds",
-                                      i, cameraMatrix,
+                                      i, 
                                       R, T);
 
         if(!is_costvolume_initialized) {
@@ -80,11 +86,9 @@ void App_main()
               
               d.download(ret);
               pfShow("D function", ret, 0, cv::Vec2d(0, layers));
-              a.download(ret);
-              pfShow("A function", ret, 0, cv::Vec2d(0, layers));
-            }while(!doneOptimizing);
+            } while(!doneOptimizing);
 
-            cv::waitKey(0);
+            // cv::waitKey(0);
 
             optimizer.lambda=0.01f;
             optimizer.optimizeA(d,a);

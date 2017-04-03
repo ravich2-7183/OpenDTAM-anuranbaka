@@ -68,7 +68,6 @@ CostVolume::CostVolume(Mat image, FrameID _fid, int _layers, float _near,
     FLATALLOC(loInd);
     dataContainer.create(layers, rows * cols, CV_32FC1);
     
-    GpuMat tmp;
     baseImage.upload(image.reshape(0,1));
     cvtColor(baseImage,baseImageGray,CV_RGB2GRAY);
     baseImage=baseImage.reshape(0,rows);
@@ -187,11 +186,11 @@ void CostVolume::updateCost(const Mat& _image, const cv::Mat& R, const cv::Mat& 
     cameraMatrixTex(Range(0,2), Range(2,3)) += 0.5; // add 0.5 to x, y out. removing causes crash!
 
     Mat imFromWorld=cameraMatrixTex*viewMatrixImage; // 3x4
-    Mat imFromCV=imFromWorld*projection.inv();
-    imFromCV.colRange(2,3)*=depthStep;
+    Mat imFromCostVolume=imFromWorld*projection.inv();
+    imFromCostVolume.colRange(2,3)*=depthStep;
     
     //for each slice
-    double *p = (double*)imFromCV.data;
+    double *p = (double*)imFromCostVolume.data;
     m34 persp;
     for(int i=0;i<12;i++)
       persp.data[i]=p[i];
