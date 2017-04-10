@@ -2,7 +2,6 @@
 #include <stdio.h>
 
 #include "convertAhandaPovRayToStandard.h"
-// #include "CostVolume/Cost.h"
 #include "CostVolume/CostVolume.hpp"
 #include "Optimizer/Optimizer.hpp"
 #include "DepthmapDenoiseWeightedHuber/DepthmapDenoiseWeightedHuber.hpp"
@@ -16,22 +15,34 @@ using namespace cv;
 using namespace cv::gpu;
 using namespace std;
 
-void App_main()
+void App_main(const cv::FileStorage& settings_file)
 {
     pthread_setname_np(pthread_self(), "App_main");
 
-    const int    numImg              = 50;
-    const int    imagesPerCV         = 5;
-    const int    layers              = 32;
-    const float  near                = 0.010f;
-    const float  far                 = 0.0f;
-
-   /* Mat cameraMatrix=(Mat_<double>(3,3) << 480,0.0,320.5,
-										    0.0,480.0,240.5,
-										    0.0,0.0,1.0);*/
-    Mat cameraMatrix=(Mat_<double>(3,3) << 481.20,  0.0, 319.5,
-                                             0.0, 480.0, 239.5,
-                                             0.0,   0.0,   1.0);
+    const int   numImg      = 50;
+    const int   imagesPerCV = settings_file["imagesPerCostVolume"];
+    const int   layers      = settings_file["costVolumeLayers"];
+    const float near        = settings_file["nearInverseDistance"];
+    const float far         = settings_file["farInverseDistance"];
+    
+    const float thetaStart  = settings_file["thetaStart"];
+    const float thetaMin    = settings_file["thetaMin"];
+    const float thetaStep   = settings_file["thetaStep"];
+    const float epsilon     = settings_file["epsilon"];
+    const float lambda      = settings_file["lambda"];
+    
+    const int denoiserItrs  = settings_file["denoiserItrs"];
+    
+    float fx, fy, cx, cy;
+    fx = settings_file["Camera.fx"];
+    fy = settings_file["Camera.fy"];
+    cx = settings_file["Camera.cx"];
+    cy = settings_file["Camera.cy"];
+    
+    // setup camera matrix
+    Mat cameraMatrix = (Mat_<double>(3,3) <<  fx,  0.0,  cx,
+                                             0.0,   fy,  cy,
+                                             0.0,  0.0, 1.0);
     
     char filename[500];
     Mat image, R, T;
@@ -66,7 +77,7 @@ void App_main()
             costvolume.updateCost(image, R, T); // increments costvolume.count
         }
         else { //Attach optimizer
-            Optimizer optimizer(costvolume);
+            Optimizer optimizer(costvolume, thetaStart, thetaMin, thetaStep, epsilon, lambda);
             optimizer.initOptimization();
             s=optimizer.cvStream;
             
@@ -81,7 +92,8 @@ void App_main()
 
             bool doneOptimizing;
             do {
-              d=denoiser(a, optimizer.epsilon, optimizer.getTheta());
+              for(int i = 1; i <= denoiserItrs; i++)
+                d=denoiser(a, optimizer.epsilon, optimizer.getTheta());
               doneOptimizing=optimizer.optimizeA(d,a);
               
               d.download(ret);
@@ -105,9 +117,17 @@ void App_main()
     Stream::Null().waitForCompletion();
 }
 
-int main( int argc, char** argv ){
+int main(int argc, char** argv) {
+    if(argc < 2) {
+      cout << "\nUsage: executable_name path/to/settings_file \n";
+      exit(0);
+    }
+    
+    string settings_filename = argv[1];
+    cv::FileStorage settings_file(settings_filename, cv::FileStorage::READ);
+
     initGui();
-    App_main();
+    App_main(settings_file);
     ImplThread::stopAllThreads();
     return 0;
 }

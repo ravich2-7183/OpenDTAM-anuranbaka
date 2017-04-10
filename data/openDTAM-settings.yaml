@@ -1,0 +1,53 @@
+%YAML:1.0
+
+# Camera Parameters. Adjust them!
+Camera.rows: 480
+Camera.cols: 640
+
+# Camera calibration parameters (OpenCV) 
+Camera.fx: 481.20
+Camera.fy: 480.00
+Camera.cx: 319.5 # 800.7
+Camera.cy: 239.5 # 719.5
+
+# Camera distortion paremeters (OpenCV) --
+Camera.k1: 0.0
+Camera.k2: 0.0
+Camera.p1: 0.0
+Camera.p2: 0.0
+
+# # Camera calibration parameters (OpenCV) 
+# Camera.fx: 508.353158
+# Camera.fy: 510.167196
+# Camera.cx: 311.288297
+# Camera.cy: 235.728826
+
+# # Camera distortion paremeters (OpenCV) --
+# Camera.k1: 0.043922
+# Camera.k2: -0.016877
+# Camera.p1: 0.002922
+# Camera.p2: -0.005741
+
+# Camera frames per second 
+Camera.fps: 24.0
+
+# Color order of the images (0: BGR, 1: RGB. It is ignored if images are grayscale)
+Camera.RGB: 1
+
+#-----------------------------------------------------------------------------------------------
+## Changing the parameters below could seriously degrade the performance of the openDTAM system
+
+# Cost Volume properties
+imagesPerCostVolume : 5
+costVolumeLayers    : 32
+nearInverseDistance :  .01 #0.010 # change to .002 or slightly larger
+farInverseDistance  : 0.0 #0.0
+
+# Optimizer parameters
+thetaStart :    0.2
+thetaMin   :    1e-4
+thetaStep  :     .97
+epsilon    :     .10
+lambda     :     .01
+
+denoiserItrs :  10

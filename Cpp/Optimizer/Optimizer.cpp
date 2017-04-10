@@ -13,27 +13,25 @@ using namespace cv;
 using namespace gpu;
 static void memZero(GpuMat& in,Stream& cvStream);
 
-void Optimizer::setDefaultParams()
-{
-    // thetaStart =    20.00;
-    // thetaMin   =     1.00;
-    thetaStart =    0.2;
-    thetaMin   =    1e-4;
-    thetaStep  =      .97;
-    epsilon    =      .10;
-    lambda     =      .01;
-}
-
 static void memZero(GpuMat& in,Stream& cvStream)
 {
     cudaSafeCall(cudaMemsetAsync(in.data,0,in.rows*in.cols*sizeof(float),cv::gpu::StreamAccessor::getStream(cvStream)));
 }
 
-Optimizer::Optimizer(CostVolume& cv)
+Optimizer::Optimizer(CostVolume& cv,
+                     float thetaStartIn,
+                     float thetaMinIn,
+                     float thetaStepIn,
+                     float epsilonIn,
+                     float lambdaIn) :
+thetaStart(thetaStartIn),
+thetaMin(thetaMinIn),
+thetaStep(thetaStepIn),
+epsilon(epsilonIn),
+lambda(lambdaIn)
 {
     attach(cv);
     initOptimization();
-    
 }
 
 void Optimizer::attach(CostVolume& cv)
@@ -41,7 +39,6 @@ void Optimizer::attach(CostVolume& cv)
     //For performance reasons, OpenDTAM only supports multiple of 32 image sizes with cols >= 64
     CV_Assert(cv.rows % 32 == 0 && cv.cols % 32 == 0 && cv.cols >= 64);
     allocate();
-    setDefaultParams();
     stableDepthEnqueued=haveStableDepth=0;
     this->cv=cv;
     cvStream=cv.cvStream;

@@ -32,21 +32,32 @@ class DenseMapper
   tf::TransformListener tf_listener_;
   tf::StampedTransform transform_;
 
+  // CostVolume properties
+  CostVolume costvolume_;
+  bool is_costvolume_initialized_;
   const int   images_per_cost_volume_;
   const int   layers_;
   const float near_;
   const float far_;
 
-  CostVolume costvolume_;
-  bool is_costvolume_initialized_;
   Stream gpu_stream_;
 
+  // camera properties
   Mat image_;
   const int rows_, cols_;
   double fps_;
   Mat camera_matrix_;
   cv_bridge::CvImagePtr input_bridge_;
 
+  // Optimizer properties
+  const float thetaStart_;
+  const float thetaMin_;
+  const float thetaStep_;
+  const float epsilon_;
+  const float lambda_;
+
+  const int denoiserItrs_;
+  
   //a place to return downloaded images to
   Mat ret_;
   CudaMem cret_;
@@ -61,22 +72,35 @@ public:
       rows_(rows),
       cols_(cols),
       cret_(rows, cols, CV_32FC1),
-      images_per_cost_volume_(5), 
-      layers_(32),
-      near_(0.010f),
-      far_(0.0f),
       is_costvolume_initialized_(false),
       tf_out_("../orb_slam_tf.txt", ofstream::out),
-      tf_idx_(0)
+      tf_idx_(0),
+      images_per_cost_volume_(settings_file["imagesPerCostVolume"]),
+      layers_(settings_file["costVolumeLayers"]),
+      near_(settings_file["nearInverseDistance"]),
+      far_(settings_file["farInverseDistance"]),
+      thetaStart_(settings_file["thetaStart"]),
+      thetaMin_(settings_file["thetaMin"]),
+      thetaStep_(settings_file["thetaStep"]),
+      epsilon_(settings_file["epsilon"]),
+      lambda_(settings_file["lambda"]),
+      denoiserItrs_(settings_file["denoiserItrs"])
   {
     ret_=cret_.createMatHeader();
 
     fps_ = settings_file["Camera.fps"];
-
+    
+    float fx, fy, cx, cy;
+    fx = settings_file["Camera.fx"];
+    fy = settings_file["Camera.fy"];
+    cx = settings_file["Camera.cx"];
+    cy = settings_file["Camera.cy"];
+    
     // setup camera matrix
-    camera_matrix_ = (Mat_<double>(3,3) << 481.20,  0.0, 319.5,
-                                             0.0, 480.0, 239.5,
-                                             0.0,   0.0,   1.0);
+    camera_matrix_ = (Mat_<double>(3,3) <<    fx,  0.0,  cx,
+                                             0.0,   fy,  cy,
+                                             0.0,  0.0, 1.0);
+    
 
     // setup display windows
     ret_ = Mat::zeros(rows, cols, CV_32FC1);
@@ -131,7 +155,7 @@ public:
     
     cv::Mat Rcw =  Rwc.t();
     cv::Mat Tcw = -Rwc*Twc;
-    // Tcv *= 100.00; // TODO: See if this works
+    // Tcw *= 100.00; // TODO: See if this works
 
     tf_out_ << acquisition_time << endl;
     tf_out_ << transform_.stamp_ << endl;
@@ -154,7 +178,7 @@ public:
     }
     else{
       // Attach optimizer & estimate depth map
-      Optimizer optimizer(costvolume_);
+      Optimizer optimizer(costvolume_, thetaStart_, thetaMin_, thetaStep_, epsilon_, lambda_);
       optimizer.initOptimization();
       gpu_stream_=optimizer.cvStream;
         
@@ -169,7 +193,9 @@ public:
         
       bool doneOptimizing;
       do {
-        d              = denoiser(a, optimizer.epsilon, optimizer.getTheta());
+        for(int i = 1; i <= denoiserItrs_; i++)
+          d=denoiser(a, optimizer.epsilon, optimizer.getTheta());
+        
         doneOptimizing = optimizer.optimizeA(d,a);
         
         d.download(ret_);
@@ -192,7 +218,7 @@ void myExit(){
   ImplThread::stopAllThreads();
 }
 
-int main( int argc, char** argv ) {
+int main(int argc, char** argv) {
   if(argc < 2) {
     cout << "\nUsage: executable_name path/to/settings_file \n";
     exit(0);

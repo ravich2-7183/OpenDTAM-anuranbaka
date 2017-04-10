@@ -41,6 +41,5 @@ ORBextractor.fastTh: 20
 # ORB Extractor: Score to sort features. 0 -> Harris Score, 1 -> FAST Score			
 ORBextractor.nScoreType: 1
 
-
 # Constant Velocity Motion Model (0 - disabled, 1 - enabled [recommended])
 UseMotionModel: 1

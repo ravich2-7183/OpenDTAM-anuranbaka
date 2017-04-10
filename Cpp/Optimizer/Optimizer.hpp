@@ -11,16 +11,19 @@ class Optimizer
 public:
     CostVolume cv;//The cost volume we are attached to
     
-    Optimizer(CostVolume& cv);
-
+    Optimizer(CostVolume& cv,
+              float thetaStartIn = 0.2,
+              float thetaMinIn   = 1e-4,
+              float thetaStepIn  = 0.97,
+              float epsilonIn    = 0.10,
+              float lambdaIn     = 0.01);
+    
     void attach(CostVolume& cv);
     void initOptimization();
     bool optimizeA(const cv::gpu::GpuMat d, cv::gpu::GpuMat a);
 
     const cv::Mat depthMap();
     
-    void setDefaultParams();
-
     //public parameters
     float thetaStart,thetaStep,thetaMin,epsilon,lambda;
 
